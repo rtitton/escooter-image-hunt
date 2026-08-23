@@ -12,9 +12,9 @@ Implementare un criterio di qualità sulle immagini da utilizzare per selezionar
 
 ## Aspetti pratici
 - formato per i dataset Roboflow scaricati: YOLO
-- per ora consideriamo solo dataset con bounding box native (annotazioni a 5 campi: classe, x, y, w, h). Dataset con maschere/poligoni di segmentazione sono rimandati a una fase successiva, in cui andranno convertiti in bounding box.
+- i dataset con annotazioni a poligono (maschere di segmentazione) vengono convertiti in bounding box: il box minimo che contiene esattamente il poligono (min/max delle coordinate dei vertici). La conversione avviene nella versione interim, il raw resta poligono se tale era in origine.
 - i vari dataset avranno in generale id di classi non uniformi e potrebbero contenere, oltre a e-scooter, anche classi COCO e altre classi non COCO.
-- i dataset scaricati vanno deduplicati dalle immagini generate da augmentation (Roboflow le aggiunge tipicamente solo allo split di train): si raggruppano i file per nome-base, tenendo una sola immagine per gruppo (`scripts/dedupe_augmented.py`).
+- i dataset scaricati vanno deduplicati dalle immagini generate da augmentation (Roboflow le aggiunge tipicamente solo allo split di train): si raggruppano i file per nome-base e si copia una sola immagine per gruppo (preferendo quella senza segni di rotazione, quando disponibile) in `data/interim/<id>-dedup/`, lasciando `data/raw/<id>/` invariato (`scripts/dedupe_augmented.py`, che applica anche la conversione poligono→bbox sopra descritta).
 - sul dataset unione manteniamo solo la classe e-scooter e la rimappiamo con id 80
 - sul dataset unione annotiamo tutte le classi COCO usando un modello Ultralytics pretrained di grandi dimensioni per avere massima accuratezza.
 - il problema principale del progetto è la definizione del criterio di qualità per la selezione delle immagini; gli altri step sono automatismi relativamente semplici.
