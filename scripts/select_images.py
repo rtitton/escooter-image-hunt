@@ -8,11 +8,35 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
 2. deduplicazione cross-dataset per contenuto (perceptual hash), a
    differenza di dedupe_augmented.py che opera solo entro un dataset;
 3. filtro varietà: almeno un'istanza di una classe COCO (diversa da
-   escooter) rilevata da un modello YOLO pretrained.
+   escooter) rilevata da un modello YOLO pretrained;
+4. scarto delle immagini in cui una bbox escooter include il conducente:
+   alcuni dataset sorgente annotano l'intera persona invece del solo
+   monopattino, il che confonderebbe il training rispetto alla classe
+   "persona". Si stima quanta parte di ogni bbox escooter è spiegata da una
+   persona rilevata dal modello COCO. Il controllo è ripetuto su tutte e 4
+   le orientazioni (0/90/180/270°) e non solo su quella originale: alcune
+   immagini sorgente sono ruotate/flippate rispetto al contenuto reale (una
+   persona in piedi appare sdraiata nel frame), e un rilevatore addestrato
+   su foto diritte spesso manca la persona in quell'orientazione — un
+   controllo euristico più economico (basato sul padding nero tipico delle
+   immagini ruotate) si è rivelato inaffidabile su questi casi, da qui la
+   scelta di controllare sempre tutte le orientazioni invece di provare a
+   indovinare quali immagini ne hanno bisogno. Questo quadruplica il costo
+   GPU del filtro varietà, compensato usando un modello più piccolo
+   (yolo11l invece di yolo11x). Lo scarto è sull'immagine intera anche se
+   una sola bbox è contaminata: escludere solo quella bbox lascerebbe
+   nell'immagine un monopattino visibile ma non annotato, un falso negativo
+   che confonderebbe il training almeno quanto il problema che si vuole
+   risolvere.
 
 Non copia immagini: scrive un file di testo con un path per riga (relativo a
 data/interim/) delle immagini candidate, e un log con il motivo di scarto di
-ogni immagine esclusa. La copia in un dataset di unione è uno step separato.
+ogni immagine esclusa. Le immagini scartate per conducente incluso finiscono
+in un elenco separato (data/flagged_rider_contamination.txt), da rivedere/
+correggere manualmente in un secondo momento invece di buttarle: hanno
+comunque superato tutti gli altri criteri di qualità. La copia effettiva
+delle immagini (candidate o flaggate) in una cartella è uno step separato
+(build_union_dataset.py).
 """
 import argparse
 from pathlib import Path
@@ -27,11 +51,14 @@ import dataset_index
 DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
 SPLITS = ("train", "valid", "test")
 
-CLOSEUP_AREA_THRESHOLD = 0.8  # area relativa (w*h) oltre la quale un'istanza escooter è "primo piano"
+CLOSEUP_AREA_THRESHOLD = 0.4  # area relativa (w*h) oltre la quale un'istanza escooter è "primo piano"
 MIN_PIXELS = 160_000  # dimensione minima immagine (larghezza*altezza)
-PHASH_DISTANCE_THRESHOLD = 5  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
-COCO_MODEL = "yolo11x.pt"
+PHASH_DISTANCE_THRESHOLD = 8  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
+COCO_MODEL = "yolo11l.pt"
 COCO_BATCH_SIZE = 16
+ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
+PERSON_CLASS_ID = 0  # classe "person" in COCO
+RIDER_OVERLAP_THRESHOLD = 0.5  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
 
 
 def load_datasets() -> list[dict]:
@@ -177,30 +204,129 @@ def dedupe_cross_dataset(items: list, log: list) -> list:
     return survivors
 
 
-def apply_variety_filter(items: list, log: list, limit: int | None = None) -> list:
+def escooter_box_pixel_xyxy(box: tuple, w_px: int, h_px: int) -> tuple:
+    _, xc, yc, w, h = box
+    return (
+        (xc - w / 2) * w_px,
+        (yc - h / 2) * h_px,
+        (xc + w / 2) * w_px,
+        (yc + h / 2) * h_px,
+    )
+
+
+def containment_ratio(box_xyxy: tuple, other_xyxy: tuple) -> float:
+    """Frazione dell'area di box_xyxy coperta dall'intersezione con other_xyxy."""
+    x1, y1 = max(box_xyxy[0], other_xyxy[0]), max(box_xyxy[1], other_xyxy[1])
+    x2, y2 = min(box_xyxy[2], other_xyxy[2]), min(box_xyxy[3], other_xyxy[3])
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    area = (box_xyxy[2] - box_xyxy[0]) * (box_xyxy[3] - box_xyxy[1])
+    return inter / area if area > 0 else 0.0
+
+
+def rotate_point(x: float, y: float, w: int, h: int, const) -> tuple:
+    """Coordinate di (x, y) — punto in un'immagine w x h — dopo
+    Image.transpose(const). Formule verificate empiricamente (vedi PIL
+    Image.ROTATE_90/180/270)."""
+    if const is None:
+        return x, y
+    if const == Image.ROTATE_90:
+        return y, w - 1 - x
+    if const == Image.ROTATE_180:
+        return w - 1 - x, h - 1 - y
+    if const == Image.ROTATE_270:
+        return h - 1 - y, x
+    raise ValueError(const)
+
+
+def rotate_box(box_xyxy: tuple, w: int, h: int, const) -> tuple:
+    x1, y1, x2, y2 = box_xyxy
+    corners = [rotate_point(x, y, w, h, const) for x, y in ((x1, y1), (x2, y1), (x1, y2), (x2, y2))]
+    xs, ys = [c[0] for c in corners], [c[1] for c in corners]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def apply_variety_filter(items: list, log: list, limit: int | None = None) -> tuple[list, list]:
     """Scarta le immagini in cui il modello YOLO pretrained COCO non rileva
-    nessuna istanza (COCO non ha una classe escooter, quindi ogni rilevamento
-    conta come 'varietà')."""
+    nessuna istanza nell'orientazione originale (COCO non ha una classe
+    escooter, quindi ogni rilevamento conta come 'varietà'), e separa quelle
+    in cui almeno una bbox escooter è per lo più coperta da una detection
+    'persona' (probabile conducente incluso nell'annotazione sorgente).
+    Il controllo di sovrapposizione persona/bbox è ripetuto su tutte e 4 le
+    orientazioni (0/90/180/270°), non solo quella originale, perché alcune
+    immagini sorgente sono ruotate/flippate e un rilevatore addestrato su
+    foto diritte spesso manca la persona in quell'orientazione. L'intera
+    immagine viene esclusa anche se una sola bbox è contaminata, per non
+    lasciare monopattini visibili ma non annotati. Ritorna (sopravvissute,
+    flaggate per conducente incluso)."""
+    from tqdm import tqdm
     from ultralytics import YOLO
 
     model = YOLO(COCO_MODEL)
     subset = items[:limit] if limit else items
     survivors = []
-    for start in range(0, len(subset), COCO_BATCH_SIZE):
+    flagged_rider = []
+    for start in tqdm(range(0, len(subset), COCO_BATCH_SIZE), desc="filtro varietà", unit="batch"):
         batch = subset[start:start + COCO_BATCH_SIZE]
-        paths = [str(it["image_path"]) for it in batch]
-        results = model.predict(paths, verbose=False)
-        for item, result in zip(batch, results):
-            n_detected = 0 if result.boxes is None else len(result.boxes)
+        images = [Image.open(it["image_path"]).convert("RGB") for it in batch]
+
+        results_by_deg = {}
+        for deg, const in ROTATIONS.items():
+            variants = images if const is None else [im.transpose(const) for im in images]
+            results_by_deg[deg] = model.predict(variants, verbose=False)
+
+        for im in images:
+            im.close()
+
+        for i, item in enumerate(batch):
+            result0 = results_by_deg[0][i]
+            n_detected = 0 if result0.boxes is None else len(result0.boxes)
             if n_detected == 0:
                 log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza COCO rilevata)")
                 continue
+
+            h_px, w_px = result0.orig_shape
+            contaminated = False
+            for deg, const in ROTATIONS.items():
+                result = results_by_deg[deg][i]
+                if result.boxes is None:
+                    continue
+                person_boxes = [
+                    tuple(xyxy) for cls, xyxy in zip(result.boxes.cls.tolist(), result.boxes.xyxy.tolist())
+                    if int(cls) == PERSON_CLASS_ID
+                ]
+                if not person_boxes:
+                    continue
+                for esc in item["escooter_boxes"]:
+                    esc_xyxy = rotate_box(escooter_box_pixel_xyxy(esc, w_px, h_px), w_px, h_px, const)
+                    if max(containment_ratio(esc_xyxy, p) for p in person_boxes) >= RIDER_OVERLAP_THRESHOLD:
+                        contaminated = True
+                        break
+                if contaminated:
+                    break
+
+            if contaminated:
+                log.append(f"FLAGGATA {rel_label(item)}  (almeno una bbox escooter include probabilmente il conducente)")
+                flagged_rider.append(item)
+                continue
+
             survivors.append(item)
-    return survivors
+    return survivors, flagged_rider
 
 
 CANDIDATES_PATH = DATA_ROOT / "selected_images.txt"
+FLAGGED_RIDER_PATH = DATA_ROOT / "flagged_rider_contamination.txt"
 LOG_PATH = DATA_ROOT / "logs" / "select_images.log"
+
+
+def write_flagged(flagged: list) -> None:
+    FLAGGED_RIDER_PATH.write_text(
+        "# Immagini con bbox escooter che includono probabilmente il conducente "
+        "(sovrapposizione con una detection 'persona' del modello COCO) — un path per riga, "
+        "relativo a data/interim/. Hanno superato tutti gli altri criteri di qualità: da "
+        "rivedere/correggere manualmente (vedi build_union_dataset.py --candidates-file), non da buttare.\n"
+        + "\n".join(rel_label(item) for item in flagged) + "\n"
+    )
+    print(f"Immagini flaggate (conducente incluso) scritte in {FLAGGED_RIDER_PATH} ({len(flagged)} immagini)")
 
 
 def write_outputs(survivors: list, log: list, stage: str) -> None:
@@ -250,10 +376,11 @@ def main():
         return
 
     before = len(survivors)
-    survivors = apply_variety_filter(survivors, log, limit=args.limit)
+    survivors, flagged_rider = apply_variety_filter(survivors, log, limit=args.limit)
     print(f"Dopo il filtro varietà COCO: {len(survivors)}/{before} immagini sopravvissute "
-          f"({before - len(survivors)} scartate).")
+          f"({before - len(survivors)} scartate, di cui {len(flagged_rider)} per conducente incluso in una bbox).")
     write_outputs(survivors, log, args.stage)
+    write_flagged(flagged_rider)
 
 
 if __name__ == "__main__":
