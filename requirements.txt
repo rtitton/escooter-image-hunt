@@ -1,8 +1,0 @@
-roboflow
-python-dotenv
-pyyaml
-numpy
-pillow
-imagehash
-ultralytics
-torch
