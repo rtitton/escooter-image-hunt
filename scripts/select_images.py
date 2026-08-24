@@ -39,6 +39,7 @@ delle immagini (candidate o flaggate) in una cartella è uno step separato
 (build_union_dataset.py).
 """
 import argparse
+import json
 from pathlib import Path
 
 import imagehash
@@ -59,6 +60,8 @@ COCO_BATCH_SIZE = 16
 ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
 PERSON_CLASS_ID = 0  # classe "person" in COCO
 RIDER_OVERLAP_THRESHOLD = 0.5  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
+VARIETY_CACHE_PATH = DATA_ROOT / "cache" / "variety_filter_cache.json"
+VARIETY_CACHE_SAVE_EVERY = 20  # batch tra un salvataggio incrementale della cache e il successivo
 
 
 def load_datasets() -> list[dict]:
@@ -245,7 +248,45 @@ def rotate_box(box_xyxy: tuple, w: int, h: int, const) -> tuple:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def apply_variety_filter(items: list, log: list, limit: int | None = None) -> tuple[list, list]:
+def variety_cache_key(item: dict) -> str:
+    return rel_label(item)
+
+
+def load_variety_cache(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def save_variety_cache(cache: dict, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cache, indent=2))
+
+
+def variety_cache_is_valid(entry: dict, image_path: Path) -> bool:
+    """Un'immagine può cambiare contenuto pur mantenendo lo stesso path se il
+    dataset viene rigenerato (es. dedupe_augmented sceglie un "keeper" diverso
+    tra una run e l'altra): si invalida la entry se mtime/dimensione del file
+    non corrispondono più a quelli registrati al momento dell'inferenza."""
+    stat = image_path.stat()
+    return entry.get("mtime") == stat.st_mtime and entry.get("size") == stat.st_size
+
+
+def detections_from_result(result) -> list:
+    """Estrae le detection di un risultato YOLO come liste JSON-serializzabili
+    [classe, x1, y1, x2, y2]."""
+    if result.boxes is None:
+        return []
+    return [
+        [int(cls), *xyxy]
+        for cls, xyxy in zip(result.boxes.cls.tolist(), result.boxes.xyxy.tolist())
+    ]
+
+
+def apply_variety_filter(
+    items: list, log: list, limit: int | None = None, refresh_cache: bool = False,
+    cache_path: Path = VARIETY_CACHE_PATH,
+) -> tuple[list, list]:
     """Scarta le immagini in cui il modello YOLO pretrained COCO non rileva
     nessuna istanza nell'orientazione originale (COCO non ha una classe
     escooter, quindi ogni rilevamento conta come 'varietà'), e separa quelle
@@ -257,59 +298,92 @@ def apply_variety_filter(items: list, log: list, limit: int | None = None) -> tu
     foto diritte spesso manca la persona in quell'orientazione. L'intera
     immagine viene esclusa anche se una sola bbox è contaminata, per non
     lasciare monopattini visibili ma non annotati. Ritorna (sopravvissute,
-    flaggate per conducente incluso)."""
-    from tqdm import tqdm
-    from ultralytics import YOLO
+    flaggate per conducente incluso).
 
-    model = YOLO(COCO_MODEL)
+    Le detection YOLO (tutte e 4 le orientazioni) sono cache su disco per
+    (dataset, split, nome immagine): rigirare la pipeline dopo aver aggiunto
+    un dataset non richiede più di rifare l'inferenza sulle immagini già
+    processate in una run precedente."""
     subset = items[:limit] if limit else items
+    cache = load_variety_cache(cache_path)
+
+    if refresh_cache:
+        to_infer = subset
+    else:
+        to_infer = [it for it in subset
+                    if variety_cache_key(it) not in cache
+                    or not variety_cache_is_valid(cache[variety_cache_key(it)], it["image_path"])]
+
+    if to_infer:
+        from tqdm import tqdm
+        from ultralytics import YOLO
+
+        print(f"Filtro varietà: {len(subset) - len(to_infer)}/{len(subset)} immagini già in cache, "
+              f"inferenza YOLO su {len(to_infer)}.")
+        model = YOLO(COCO_MODEL)
+        try:
+            for batch_i, start in enumerate(
+                tqdm(range(0, len(to_infer), COCO_BATCH_SIZE), desc="filtro varietà (inferenza)", unit="batch")
+            ):
+                batch = to_infer[start:start + COCO_BATCH_SIZE]
+                images = [Image.open(it["image_path"]).convert("RGB") for it in batch]
+
+                results_by_deg = {}
+                for deg, const in ROTATIONS.items():
+                    variants = images if const is None else [im.transpose(const) for im in images]
+                    results_by_deg[deg] = model.predict(variants, verbose=False)
+
+                for im in images:
+                    im.close()
+
+                for i, item in enumerate(batch):
+                    result0 = results_by_deg[0][i]
+                    h_px, w_px = result0.orig_shape
+                    stat = item["image_path"].stat()
+                    cache[variety_cache_key(item)] = {
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                        "orig_shape": [h_px, w_px],
+                        "detections": {
+                            str(deg): detections_from_result(results_by_deg[deg][i]) for deg in ROTATIONS
+                        },
+                    }
+
+                if (batch_i + 1) % VARIETY_CACHE_SAVE_EVERY == 0:
+                    save_variety_cache(cache, cache_path)
+        finally:
+            save_variety_cache(cache, cache_path)
+
     survivors = []
     flagged_rider = []
-    for start in tqdm(range(0, len(subset), COCO_BATCH_SIZE), desc="filtro varietà", unit="batch"):
-        batch = subset[start:start + COCO_BATCH_SIZE]
-        images = [Image.open(it["image_path"]).convert("RGB") for it in batch]
+    for item in subset:
+        entry = cache[variety_cache_key(item)]
+        h_px, w_px = entry["orig_shape"]
+        detections_by_deg = {int(deg): dets for deg, dets in entry["detections"].items()}
 
-        results_by_deg = {}
+        if not detections_by_deg[0]:
+            log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza COCO rilevata)")
+            continue
+
+        contaminated = False
         for deg, const in ROTATIONS.items():
-            variants = images if const is None else [im.transpose(const) for im in images]
-            results_by_deg[deg] = model.predict(variants, verbose=False)
-
-        for im in images:
-            im.close()
-
-        for i, item in enumerate(batch):
-            result0 = results_by_deg[0][i]
-            n_detected = 0 if result0.boxes is None else len(result0.boxes)
-            if n_detected == 0:
-                log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza COCO rilevata)")
+            person_boxes = [tuple(det[1:]) for det in detections_by_deg[deg] if det[0] == PERSON_CLASS_ID]
+            if not person_boxes:
                 continue
-
-            h_px, w_px = result0.orig_shape
-            contaminated = False
-            for deg, const in ROTATIONS.items():
-                result = results_by_deg[deg][i]
-                if result.boxes is None:
-                    continue
-                person_boxes = [
-                    tuple(xyxy) for cls, xyxy in zip(result.boxes.cls.tolist(), result.boxes.xyxy.tolist())
-                    if int(cls) == PERSON_CLASS_ID
-                ]
-                if not person_boxes:
-                    continue
-                for esc in item["escooter_boxes"]:
-                    esc_xyxy = rotate_box(escooter_box_pixel_xyxy(esc, w_px, h_px), w_px, h_px, const)
-                    if max(containment_ratio(esc_xyxy, p) for p in person_boxes) >= RIDER_OVERLAP_THRESHOLD:
-                        contaminated = True
-                        break
-                if contaminated:
+            for esc in item["escooter_boxes"]:
+                esc_xyxy = rotate_box(escooter_box_pixel_xyxy(esc, w_px, h_px), w_px, h_px, const)
+                if max(containment_ratio(esc_xyxy, p) for p in person_boxes) >= RIDER_OVERLAP_THRESHOLD:
+                    contaminated = True
                     break
-
             if contaminated:
-                log.append(f"FLAGGATA {rel_label(item)}  (almeno una bbox escooter include probabilmente il conducente)")
-                flagged_rider.append(item)
-                continue
+                break
 
-            survivors.append(item)
+        if contaminated:
+            log.append(f"FLAGGATA {rel_label(item)}  (almeno una bbox escooter include probabilmente il conducente)")
+            flagged_rider.append(item)
+            continue
+
+        survivors.append(item)
     return survivors, flagged_rider
 
 
@@ -349,6 +423,8 @@ def main():
                          help="Fino a quale stadio eseguire (per testare incrementalmente); default: tutti")
     parser.add_argument("--limit", type=int, default=None,
                          help="Limita lo stadio variety alle prime N immagini sopravvissute (per test su campione)")
+    parser.add_argument("--refresh-variety-cache", action="store_true",
+                         help="Ignora la cache delle detection YOLO dello stadio variety e ricalcola tutto da zero")
     args = parser.parse_args()
 
     datasets = load_datasets()
@@ -376,7 +452,9 @@ def main():
         return
 
     before = len(survivors)
-    survivors, flagged_rider = apply_variety_filter(survivors, log, limit=args.limit)
+    survivors, flagged_rider = apply_variety_filter(
+        survivors, log, limit=args.limit, refresh_cache=args.refresh_variety_cache
+    )
     print(f"Dopo il filtro varietà COCO: {len(survivors)}/{before} immagini sopravvissute "
           f"({before - len(survivors)} scartate, di cui {len(flagged_rider)} per conducente incluso in una bbox).")
     write_outputs(survivors, log, args.stage)
