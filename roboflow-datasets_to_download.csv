@@ -1,0 +1,9 @@
+status,workspace_id,project_id,escooter_class_name,notes
+null,kdigital,electric-scooter-cd7hw,electric scooter,
+null,1-rtt72,scooter-etuqi,19,
+null,sunjune-kim,kick-scooter-3,0|1,
+null,capstone-design-project,electric-scooter-dpwkl,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,
+null,riccardo-sutxi,electric-scooters-02-od-hcoce,e-scooter,
+null,riccardo-sutxi,scooter-ddkei-tlsoa,kickboard|purple kickboard|scooter,
+ignore,genai-3dila,electric-scooters-02-od,e-scooter,forked to riccardo-sutxi/electric-scooters-02-od-hcoce
+ignore,jihoon-xw2ya,scooter-ddkei,scooter,forked to riccardo-sutxi/scooter-ddkei-tlsoa

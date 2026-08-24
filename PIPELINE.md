@@ -7,6 +7,12 @@ selezione vedi
 [claude-instruct-01-automatic-image-selection.md](claude-instruct-01-automatic-image-selection.md).
 
 ## Panoramica
+Il file è specifico di ogni istanza del progetto e determina il contenuto della directory `data`.  
+La directory `data` contiene i dataset scaricati e tutto il materiale relativo alle elaborazioni successive della pipeline.  
+In particolare contiene il file `datasets_to_download.csv` con l'elenco dei dataset Roboflow da trattare, con il relativo stato (downloaded, todo, ignore, ecc.).  
+
+L'intera directory è inclusa in `.gitignore`, e per riprodurla in una nuova istanza del progetto, è necessario creare il file `data/datasets_to_download.csv` a partire dall'elenco generale dei dataset Roboflow selezionati `roboflow-datasets_to_download.csv`.
+
 
 ```
 data/datasets_to_download.csv
