@@ -66,7 +66,14 @@ python3 scripts/download_dataset.py --workspace <ws> --project <project> \
 
 Automatizza il passo 1 (download) + il passo 2 (dedupe) per più dataset,
 leggendo `data/datasets_to_download.csv` (colonne: `status`, `workspace_id`,
-`project_id`, `escooter_class_name` con nomi separati da `|`, `notes`).
+`project_id`, `version`, `escooter_class_name` con nomi separati da `|`,
+`notes`).
+
+- `version` vuoto: usa il comportamento di default di `download_dataset.py`
+  (versione più recente senza augmentation) e, se il download va a buon
+  fine, la versione effettivamente scaricata viene scritta nella colonna
+  al termine, così diventa esplicita e riproducibile ai run successivi
+- `version` valorizzato: scarica esattamente quella versione
 
 ```
 python3 scripts/download_batch.py

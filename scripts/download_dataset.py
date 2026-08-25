@@ -18,10 +18,11 @@ def download_dataset(
     project: str,
     version: int | None = None,
     escooter_class_names: list[str] | None = None,
-) -> tuple[Path, list[str]]:
+) -> tuple[Path, int, list[str]]:
     """Scarica un dataset Roboflow, verifica il formato annotazioni e (se
     escooter_class_names è fornito) che quei nomi esistano nel data.yaml.
-    Aggiorna l'indice. Ritorna (cartella scaricata, nomi classe mancanti)."""
+    Aggiorna l'indice. Ritorna (cartella scaricata, versione scaricata,
+    nomi classe mancanti)."""
     rf = Roboflow(api_key=config.RF_API_KEY)
     rf_project = rf.workspace(workspace).project(project)
 
@@ -52,7 +53,7 @@ def download_dataset(
     annotation_format = check_annotation_format(out_dir)
     missing = validate_class_names(out_dir, escooter_class_names) if escooter_class_names else []
     update_index(out_dir, workspace, project, version_number, annotation_format, escooter_class_names or [], missing)
-    return out_dir, missing
+    return out_dir, version_number, missing
 
 
 def check_annotation_format(dataset_dir: Path) -> str:
@@ -141,7 +142,8 @@ def main():
     args = parser.parse_args()
 
     names = args.escooter_class_names.split("|") if args.escooter_class_names else None
-    download_dataset(args.workspace, args.project, args.version, names)
+    _, version_number, _ = download_dataset(args.workspace, args.project, args.version, names)
+    print(f"Versione scaricata: {version_number}")
 
 
 if __name__ == "__main__":

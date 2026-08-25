@@ -49,16 +49,20 @@ def main():
     print(f"{len(todo_rows)} dataset da processare.")
     for row in todo_rows:
         workspace, project = row["workspace_id"], row["project_id"]
+        version = int(row["version"]) if row["version"] else None
         class_names = [n for n in row["escooter_class_name"].split("|") if n]
         print(f"\n=== {workspace}/{project} ===")
 
         try:
-            out_dir, missing = download_dataset.download_dataset(
-                workspace, project, escooter_class_names=class_names
+            out_dir, version_number, missing = download_dataset.download_dataset(
+                workspace, project, version=version, escooter_class_names=class_names
             )
         except Exception as e:
             print(f"ERRORE download {workspace}/{project}: {e}")
             continue
+
+        if version is None:
+            row["version"] = str(version_number)
 
         if missing:
             print(f"Salto la deduplica: classi mancanti nel data.yaml per {workspace}/{project}: {missing}. "
