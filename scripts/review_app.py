@@ -81,6 +81,7 @@ PAGE = """<!doctype html>
   #stage img { max-width: 96vw; max-height: 100%; display: block; }
   #stage canvas { position: absolute; pointer-events: auto; cursor: crosshair; }
   #name { text-align: center; padding: 6px; font-size: 13px; color: #999; word-break: break-all; }
+  #res-info { font-weight: bold; font-size: 17px; color: #eee; }
   #decision { font-weight: bold; }
   .sel { color: #4caf50; }
   .disc { color: #e53935; }
@@ -105,7 +106,7 @@ PAGE = """<!doctype html>
   <img id="img">
   <canvas id="canvas"></canvas>
 </div>
-<div id="name"></div>
+<div id="name"><span id="fname"></span> &nbsp;&mdash;&nbsp; <span id="res-info"></span></div>
 <div id="help">
   <kbd>s</kbd> seleziona &nbsp; <kbd>l</kbd> seleziona con riserva &nbsp; <kbd>n</kbd> scarta &nbsp;
   <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> naviga &nbsp; <kbd>backspace</kbd> cancella decisione
@@ -259,7 +260,8 @@ async function render() {
   const token = ++renderToken;
   const name = names[idx];
   document.getElementById("idx").textContent = idx + 1;
-  document.getElementById("name").textContent = name;
+  document.getElementById("fname").textContent = name;
+  document.getElementById("res-info").textContent = "";
   updateDecisionLabel();
   updateCounts();
 
@@ -269,6 +271,7 @@ async function render() {
 
   const [rawBoxes] = await Promise.all([boxesPromise, imageLoaded]);
   if (token !== renderToken) return; // superata da una navigazione più recente
+  document.getElementById("res-info").textContent = img.naturalWidth + " × " + img.naturalHeight + " px";
   currentBoxes = rawBoxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
   selectedIndex = -1;
   drag = null;
