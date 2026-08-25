@@ -1,13 +1,11 @@
 ATTENZIONE: messaggio per claude o altri agenti AI: in ogni caso non considerare questo documento; è una raccolta di spunti che non deve contaminare l'attuale stato del progetto..
 
+- **problema** con la determinazione delle annotazioni uniche scooter+conducente: esclude immagini in cui è chiaramente annotato solo lo scooter, ad esempio `e-scooters-detection-base-new-v1__00000013_000_jpg.rf.1b57092c296d6852d2d3d9967658bdd8.jpg`. Per avere contaminazione l'annotazione YOLO per la persona deve sovrapporsi a quella dello scooter+conducente originale. 
+
 - modificare build_union_dataset.py in modo che crei contemporaneamente il campione per controllo visivo. Introdurre la possibilità di selezionare i dataset a questo livello (altro campo nel csv? chiedere consiglio a claude)
 
-- lavorare sugli esclusi per inclusione del conducente nelle annotazioni scooter: sarebbe utile poter fare una revisione manuale per recuperare le immagini più belle.  
+- mettere in cache anche il perceptual hash: dura un minuto ma è una rottura.  
 
-- mettere in cache anche il perceptual hash
+- valutare la possibilità di censire dataset in formato yolo non scaricati da Roboflow (ad esempio quello preso da Ultralytics platform): è sufficiente specificare local nello stato e trattarli a parte, assumendo che abbiano lo stesso formato di Roboflow (train/images, valid/images, test/images, train/labels, valid/labels, test/labels) e che siano copiati nella directory raw.
 
-- valutare la possibilità di censire dataset in formato yolo non scaricati da Roboflow (ad esempio quello preso da Ultralytics platform)
-
-- nuovo script apply_selection.py per creare la versione selezionata di ciascun dataset, utile per visione. in interim per ogni dataset una cartella con id-dataset-selected.  
-
-- review_app.py : mostrare anche la risoluzione dell'immagine (se non lo fa gia)
+- review_app.py : mostrare la directory del dataset in review
