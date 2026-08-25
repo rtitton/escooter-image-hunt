@@ -9,12 +9,12 @@ di errore o di classi mancanti resta 'todo' e viene segnalata, così il CSV
 può essere corretto e la riga rilanciata.
 """
 import csv
-from pathlib import Path
 
+import config
 import dedupe_augmented
 import download_dataset
 
-CSV_PATH = Path(__file__).resolve().parent.parent / "data" / "datasets_to_download.csv"
+CSV_PATH = config.CSV_PATH
 
 
 def load_rows() -> tuple[list[str], list[dict]]:

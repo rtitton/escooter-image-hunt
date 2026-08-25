@@ -25,12 +25,13 @@ from pathlib import Path
 
 import yaml
 
+import config
 import dataset_index
 import select_images  # riusa escooter_class_indices() e read_boxes()
 
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-CANDIDATES_PATH = DATA_ROOT / "selected_images.txt"
-ESCOOTER_CLASS_ID = 80
+DATA_ROOT = config.DATA_ROOT
+CANDIDATES_PATH = config.CANDIDATES_PATH
+ESCOOTER_CLASS_ID = config.ESCOOTER_CLASS_ID
 
 
 def load_candidates(path: Path, limit: int | None = None) -> list[str]:

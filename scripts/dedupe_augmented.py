@@ -23,13 +23,14 @@ import numpy as np
 from PIL import Image
 
 import bbox_convert
+import config
 import dataset_index
 
 RF_SUFFIX = re.compile(r"\.rf\.[a-f0-9]+\.(jpg|jpeg|png)$", re.IGNORECASE)
 SPLITS = ("train", "valid", "test")
 
-BLACK_THRESHOLD = 10  # valore di grigio sotto il quale un pixel è considerato "nero"
-EDGE_SAMPLE = 30  # righe/colonne campionate a partire da ogni bordo
+BLACK_THRESHOLD = config.BLACK_THRESHOLD  # valore di grigio sotto il quale un pixel è considerato "nero"
+EDGE_SAMPLE = config.EDGE_SAMPLE  # righe/colonne campionate a partire da ogni bordo
 
 
 def base_name(filename: str) -> str:

@@ -13,10 +13,12 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-UNION_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "union"
-OUT_DIR = Path(__file__).resolve().parent.parent / "data" / "processed" / "union_review_sample"
-BOX_COLOR = (255, 0, 0)
-BOX_WIDTH = 4
+import config
+
+UNION_DIR = config.UNION_DIR
+OUT_DIR = config.UNION_REVIEW_SAMPLE_DIR
+BOX_COLOR = config.BOX_COLOR
+BOX_WIDTH = config.BOX_WIDTH
 
 
 def draw_boxes(image_path: Path, label_path: Path, dest: Path) -> None:

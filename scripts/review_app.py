@@ -44,6 +44,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
+import config
+
 
 def load_decisions(decisions_path: Path) -> dict:
     if decisions_path.exists():
@@ -151,7 +153,7 @@ function updateCounts() {
   document.getElementById("total").textContent = names.length;
 }
 
-const DEFAULT_CLASS = 80;
+const DEFAULT_CLASS = __ESCOOTER_CLASS_ID__;
 const HANDLE_SIZE = 10;
 const MIN_BOX_PX = 6;
 const CURSOR_FOR_HANDLE = {
@@ -459,7 +461,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
-            body = PAGE.encode("utf-8")
+            body = PAGE.replace("__ESCOOTER_CLASS_ID__", str(config.ESCOOTER_CLASS_ID)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -538,7 +540,7 @@ def main() -> None:
         "dataset_dir", type=Path,
         help="Cartella del dataset YOLO, con sottocartelle images/ e labels/",
     )
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=config.REVIEW_APP_PORT)
     parser.add_argument(
         "--decisions-file", type=Path, default=None,
         help="File JSON delle decisioni (default: <dataset_dir>/review_decisions.json)",

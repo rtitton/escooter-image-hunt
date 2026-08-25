@@ -47,21 +47,22 @@ import numpy as np
 import yaml
 from PIL import Image
 
+import config
 import dataset_index
 
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
+DATA_ROOT = config.DATA_ROOT
 SPLITS = ("train", "valid", "test")
 
-CLOSEUP_AREA_THRESHOLD = 0.4  # area relativa (w*h) oltre la quale un'istanza escooter è "primo piano"
-MIN_PIXELS = 160_000  # dimensione minima immagine (larghezza*altezza)
-PHASH_DISTANCE_THRESHOLD = 8  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
-COCO_MODEL = "yolo11l.pt"
-COCO_BATCH_SIZE = 16
+CLOSEUP_AREA_THRESHOLD = config.CLOSEUP_AREA_THRESHOLD  # area relativa (w*h) oltre la quale un'istanza escooter è "primo piano"
+MIN_PIXELS = config.MIN_PIXELS  # dimensione minima immagine (larghezza*altezza)
+PHASH_DISTANCE_THRESHOLD = config.PHASH_DISTANCE_THRESHOLD  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
+COCO_MODEL = config.COCO_MODEL
+COCO_BATCH_SIZE = config.COCO_BATCH_SIZE
 ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
-PERSON_CLASS_ID = 0  # classe "person" in COCO
-RIDER_OVERLAP_THRESHOLD = 0.5  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
-VARIETY_CACHE_PATH = DATA_ROOT / "cache" / "variety_filter_cache.json"
-VARIETY_CACHE_SAVE_EVERY = 20  # batch tra un salvataggio incrementale della cache e il successivo
+PERSON_CLASS_ID = config.PERSON_CLASS_ID  # classe "person" in COCO
+RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
+VARIETY_CACHE_PATH = config.VARIETY_CACHE_PATH
+VARIETY_CACHE_SAVE_EVERY = config.VARIETY_CACHE_SAVE_EVERY  # batch tra un salvataggio incrementale della cache e il successivo
 
 
 def load_datasets() -> list[dict]:
@@ -387,9 +388,9 @@ def apply_variety_filter(
     return survivors, flagged_rider
 
 
-CANDIDATES_PATH = DATA_ROOT / "selected_images.txt"
-FLAGGED_RIDER_PATH = DATA_ROOT / "flagged_rider_contamination.txt"
-LOG_PATH = DATA_ROOT / "logs" / "select_images.log"
+CANDIDATES_PATH = config.CANDIDATES_PATH
+FLAGGED_RIDER_PATH = config.FLAGGED_RIDER_PATH
+LOG_PATH = config.SELECT_IMAGES_LOG_PATH
 
 
 def write_flagged(flagged: list) -> None:

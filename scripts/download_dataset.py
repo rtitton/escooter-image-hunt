@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Download a Roboflow dataset in YOLO format into data/raw/."""
 import argparse
-import os
 from pathlib import Path
 
 import yaml
-from dotenv import load_dotenv
 from roboflow import Roboflow
 
+import config
 import dataset_index
 
-FORMAT = "yolov8"
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data" / "raw"
+DOWNLOAD_FORMAT = config.DOWNLOAD_FORMAT
+RAW_DIR = config.RAW_DIR
 
 
 def download_dataset(
@@ -23,8 +22,7 @@ def download_dataset(
     """Scarica un dataset Roboflow, verifica il formato annotazioni e (se
     escooter_class_names è fornito) che quei nomi esistano nel data.yaml.
     Aggiorna l'indice. Ritorna (cartella scaricata, nomi classe mancanti)."""
-    load_dotenv()
-    rf = Roboflow(api_key=os.environ["RF_API_KEY"])
+    rf = Roboflow(api_key=config.RF_API_KEY)
     rf_project = rf.workspace(workspace).project(project)
 
     versions = rf_project.versions()
@@ -47,8 +45,8 @@ def download_dataset(
               f"{' (nessuna augmentation)' if no_aug_versions else ' (attenzione: tutte le versioni hanno augmentation)'}")
 
     rf_version = rf_project.version(version_number)
-    out_dir = DATA_ROOT / f"{project}-v{version_number}"
-    rf_version.download(FORMAT, location=str(out_dir))
+    out_dir = RAW_DIR / f"{project}-v{version_number}"
+    rf_version.download(DOWNLOAD_FORMAT, location=str(out_dir))
     print(f"Dataset scaricato in {out_dir}")
 
     annotation_format = check_annotation_format(out_dir)

@@ -6,9 +6,11 @@ eseguito direttamente.
 import json
 from pathlib import Path
 
-DATA_ROOT = Path(__file__).resolve().parent.parent / "data"
-INDEX_PATH = DATA_ROOT / "datasets.json"
-README_PATH = DATA_ROOT / "README.md"
+import config
+
+DATA_ROOT = config.DATA_ROOT
+INDEX_PATH = config.INDEX_PATH
+README_PATH = config.README_PATH
 
 
 def load_index() -> list[dict]:
