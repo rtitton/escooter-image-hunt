@@ -43,6 +43,47 @@ Ogni passo aggiorna anche `data/datasets.json` (indice macchina) e
 `data/README.md` (vista leggibile), tranne gli ultimi che lavorano sul
 dataset di unione aggregato.
 
+## Comandi in sequenza (avvio da zero)
+
+Riepilogo eseguibile della pipeline completa, dal download alla revisione
+manuale finale (vedi le sezioni sotto per il dettaglio di ogni passo e le
+opzioni disponibili).
+
+```bash
+# 1. Popolare data/datasets_to_download.csv (righe status=todo), poi
+#    download + dedupe in batch per tutte le righe todo (chiama
+#    internamente download_dataset.py e dedupe_augmented.py per ognuna:
+#    non vanno lanciati a mano in questo flusso)
+python3 scripts/download_batch.py
+
+# 2. Selezione delle immagini candidate su tutti i dataset deduplicati registrati
+python3 scripts/select_images.py
+
+# 3. Costruzione del dataset di unione dalle candidate (classe escooter rimappata a 80)
+python3 scripts/build_union_dataset.py
+
+#    ...e delle immagini flaggate per conducente incluso, per la correzione manuale
+python3 scripts/build_union_dataset.py --candidates-file data/flagged_rider_contamination.txt \
+    --out-dir data/processed/rider_review
+
+# 3b. (opzionale, indipendente dal passo 3) estrae le candidate mantenendo i
+#     dataset sorgente separati e le classi originali (senza remap a 80),
+#     in data/interim/<id>-selected/ — utile per ispezionare la selezione
+#     dataset per dataset
+python3 scripts/build_selected_datasets.py
+
+# 4. Campione per controllo visivo del dataset di unione
+python3 scripts/visual_check_sample.py
+
+# 5. Selezione manuale finale (apre http://localhost:8765)
+python3 scripts/review_app.py
+```
+
+`download_dataset.py` e `dedupe_augmented.py` (sezioni 1 e 2 sotto) restano
+utili per aggiungere o rigenerare un singolo dataset fuori dal CSV, ma non
+fanno parte del giro "da zero": in quel caso il punto di ingresso è sempre
+`download_batch.py`.
+
 ## 1. Download di un dataset — `download_dataset.py`
 
 Scarica un progetto Roboflow (formato YOLO) in `data/raw/<project>-v<versione>/`.
