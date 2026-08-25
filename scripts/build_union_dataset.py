@@ -60,13 +60,11 @@ def main():
     
     if out_images.exists():
         shutil.rmtree(out_images)
-    else:
-        out_images.mkdir(parents=True, exist_ok=True)
+    out_images.mkdir(parents=True, exist_ok=True)
         
     if out_labels.exists():
         shutil.rmtree(out_labels)
-    else:
-        out_labels.mkdir(parents=True, exist_ok=True)
+    out_labels.mkdir(parents=True, exist_ok=True)
 
     names_cache: dict[str, list[str]] = {}
     skipped_no_escooter = []
