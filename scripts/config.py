@@ -51,6 +51,7 @@ RIDER_OVERLAP_THRESHOLD = _env_float("RIDER_OVERLAP_THRESHOLD", 0.5)
 COCO_MODEL = os.environ.get("COCO_MODEL", "yolo11l.pt")
 COCO_BATCH_SIZE = _env_int("COCO_BATCH_SIZE", 16)
 VARIETY_CACHE_SAVE_EVERY = _env_int("VARIETY_CACHE_SAVE_EVERY", 20)
+VARIETY_MIN_INSTANCES = _env_int("VARIETY_MIN_INSTANCES", 1)  # istanze COCO minime nell'orientazione originale perché un'immagine sia di buona varietà
 
 # --- Dedupe augmented (dedupe_augmented.py) ---
 BLACK_THRESHOLD = _env_int("BLACK_THRESHOLD", 10)

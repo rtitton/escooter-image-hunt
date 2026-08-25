@@ -170,8 +170,9 @@ incrementali; il quarto è parte dello stadio `variety`):
    memoria) quelle a distanza di Hamming ≤ 8; per ogni gruppo tiene
    l'immagine con più bounding box totali
 3. **filtro varietà** — scarta le immagini in cui un modello Ultralytics
-   pretrained su COCO (`yolo11l.pt`, batch da 16, GPU se disponibile) non
-   rileva nessuna istanza di nessuna classe COCO nell'orientazione originale
+   pretrained su COCO (`yolo11l.pt`, batch da 16, GPU se disponibile) rileva
+   meno di `VARIETY_MIN_INSTANCES` istanze di classi COCO (default 1)
+   nell'orientazione originale
 4. **filtro conducente incluso** — alcuni dataset sorgente annotano l'intera
    persona invece del solo monopattino (es. `electric-scooter-dpwkl-v1`, ma
    non solo). Stima quanta parte di ogni bbox escooter è spiegata da una

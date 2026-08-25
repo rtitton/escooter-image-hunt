@@ -7,8 +7,8 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
    piccola;
 2. deduplicazione cross-dataset per contenuto (perceptual hash), a
    differenza di dedupe_augmented.py che opera solo entro un dataset;
-3. filtro varietà: almeno un'istanza di una classe COCO (diversa da
-   escooter) rilevata da un modello YOLO pretrained;
+3. filtro varietà: almeno VARIETY_MIN_INSTANCES istanze (default 1) di
+   classi COCO (diverse da escooter) rilevate da un modello YOLO pretrained;
 4. scarto delle immagini in cui una bbox escooter include il conducente:
    alcuni dataset sorgente annotano l'intera persona invece del solo
    monopattino, il che confonderebbe il training rispetto alla classe
@@ -63,6 +63,7 @@ PERSON_CLASS_ID = config.PERSON_CLASS_ID  # classe "person" in COCO
 RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
 VARIETY_CACHE_PATH = config.VARIETY_CACHE_PATH
 VARIETY_CACHE_SAVE_EVERY = config.VARIETY_CACHE_SAVE_EVERY  # batch tra un salvataggio incrementale della cache e il successivo
+VARIETY_MIN_INSTANCES = config.VARIETY_MIN_INSTANCES  # istanze COCO minime nell'orientazione originale perché un'immagine sia di buona varietà
 
 
 def load_datasets() -> list[dict]:
@@ -288,9 +289,9 @@ def apply_variety_filter(
     items: list, log: list, limit: int | None = None, refresh_cache: bool = False,
     cache_path: Path = VARIETY_CACHE_PATH,
 ) -> tuple[list, list]:
-    """Scarta le immagini in cui il modello YOLO pretrained COCO non rileva
-    nessuna istanza nell'orientazione originale (COCO non ha una classe
-    escooter, quindi ogni rilevamento conta come 'varietà'), e separa quelle
+    """Scarta le immagini in cui il modello YOLO pretrained COCO rileva meno
+    di VARIETY_MIN_INSTANCES istanze nell'orientazione originale (COCO non ha
+    una classe escooter, quindi ogni rilevamento conta come 'varietà'), e separa quelle
     in cui almeno una bbox escooter è per lo più coperta da una detection
     'persona' (probabile conducente incluso nell'annotazione sorgente).
     Il controllo di sovrapposizione persona/bbox è ripetuto su tutte e 4 le
@@ -362,8 +363,9 @@ def apply_variety_filter(
         h_px, w_px = entry["orig_shape"]
         detections_by_deg = {int(deg): dets for deg, dets in entry["detections"].items()}
 
-        if not detections_by_deg[0]:
-            log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza COCO rilevata)")
+        if len(detections_by_deg[0]) < VARIETY_MIN_INSTANCES:
+            log.append(f"SCARTATA {rel_label(item)}  "
+                       f"({len(detections_by_deg[0])} istanze COCO rilevate, minimo richiesto {VARIETY_MIN_INSTANCES})")
             continue
 
         contaminated = False
