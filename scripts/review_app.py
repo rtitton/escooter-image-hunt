@@ -563,7 +563,9 @@ def main() -> None:
     Handler.backup_dir = (args.backup_dir or dataset_dir / "review_label_backups").resolve()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    num_images = sum(1 for _ in (dataset_dir / "images").iterdir())
     print(f"Dataset: {dataset_dir}")
+    print(f"Immagini trovate: {num_images}")
     print(f"Decisioni: {Handler.decisions_path}")
     print(f"Backup label: {Handler.backup_dir}")
     print(f"Apri http://localhost:{args.port} nel browser (Ctrl+C per fermare)")

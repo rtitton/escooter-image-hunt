@@ -3,6 +3,7 @@
 Usato da download_dataset.py e dedupe_augmented.py — non è pensato per essere
 eseguito direttamente.
 """
+import csv
 import json
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import config
 DATA_ROOT = config.DATA_ROOT
 INDEX_PATH = config.INDEX_PATH
 README_PATH = config.README_PATH
+CSV_PATH = config.CSV_PATH
 
 
 def load_index() -> list[dict]:
@@ -34,6 +36,20 @@ def upsert(index: list[dict], entry: dict) -> list[dict]:
     index = [e for e in index if e["id"] != entry["id"]]
     index.append(merged)
     return index
+
+
+def enabled_ids() -> set[str]:
+    """Ritorna gli id (`<project_id>-v<version>`, coerenti con quelli
+    assegnati da download_dataset.py) delle righe con enabled=1 in
+    data/datasets_to_download.csv. Usato per escludere dai passi di
+    elaborazione i dataset disabilitati senza doverli rimuovere dall'indice."""
+    with CSV_PATH.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        return {
+            f"{row['project_id']}-v{row['version']}"
+            for row in reader
+            if row["enabled"] == "1" and row["version"]
+        }
 
 
 def count_images(split_dir: Path) -> int:

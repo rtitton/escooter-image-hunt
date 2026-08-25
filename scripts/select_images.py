@@ -6,28 +6,47 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
    nessuna istanza escooter troppo grande (primo piano), immagine non troppo
    piccola;
 2. deduplicazione cross-dataset per contenuto (perceptual hash), a
-   differenza di dedupe_augmented.py che opera solo entro un dataset;
+   differenza di dedupe_augmented.py che opera solo entro un dataset. I
+   perceptual hash sono cache su disco per (dataset, split, nome immagine),
+   come le detection YOLO dello stadio variety (v. sotto): rigirare la
+   pipeline dopo aver aggiunto un dataset non richiede più di rihashare le
+   immagini già processate in una run precedente;
 3. filtro varietà: almeno VARIETY_MIN_INSTANCES istanze (default 1) di
    classi COCO (diverse da escooter) rilevate da un modello YOLO pretrained;
 4. scarto delle immagini in cui una bbox escooter include il conducente:
    alcuni dataset sorgente annotano l'intera persona invece del solo
    monopattino, il che confonderebbe il training rispetto alla classe
-   "persona". Si stima quanta parte di ogni bbox escooter è spiegata da una
-   persona rilevata dal modello COCO. Il controllo è ripetuto su tutte e 4
-   le orientazioni (0/90/180/270°) e non solo su quella originale: alcune
-   immagini sorgente sono ruotate/flippate rispetto al contenuto reale (una
-   persona in piedi appare sdraiata nel frame), e un rilevatore addestrato
-   su foto diritte spesso manca la persona in quell'orientazione — un
-   controllo euristico più economico (basato sul padding nero tipico delle
-   immagini ruotate) si è rivelato inaffidabile su questi casi, da qui la
-   scelta di controllare sempre tutte le orientazioni invece di provare a
-   indovinare quali immagini ne hanno bisogno. Questo quadruplica il costo
-   GPU del filtro varietà, compensato usando un modello più piccolo
-   (yolo11l invece di yolo11x). Lo scarto è sull'immagine intera anche se
-   una sola bbox è contaminata: escludere solo quella bbox lascerebbe
-   nell'immagine un monopattino visibile ma non annotato, un falso negativo
-   che confonderebbe il training almeno quanto il problema che si vuole
-   risolvere.
+   "persona". Un monopattino in piedi ha però una sua bbox naturalmente
+   alta e stretta (dalle ruote al manubrio, che su un adulto arriva spesso
+   all'altezza di petto/vita), che si sovrappone per il 50-90% con la bbox
+   di una persona COCO anche quando l'annotazione originale include
+   correttamente solo il monopattino: la sola frazione di area coperta
+   (containment_ratio) non distingue quindi "il manubrio è alto" da
+   "l'annotazione include il conducente". Per discriminare i due casi si
+   richiede in aggiunta che la bbox escooter copra una parte sostanziale
+   della regione testa/spalle della persona (i primi HEAD_REGION_FRACTION,
+   dal lato della testa, della sua bbox): solo un'annotazione che si
+   estende fin lassù è probabilmente contaminata, mentre una bbox che si
+   ferma a vita/petto riflette la normale altezza del manubrio. Il
+   controllo è ripetuto su tutte e 4 le orientazioni (0/90/180/270°) e non
+   solo su quella originale: alcune immagini sorgente sono ruotate/flippate
+   rispetto al contenuto reale (una persona in piedi appare sdraiata nel
+   frame), e un rilevatore addestrato su foto diritte spesso manca la
+   persona in quell'orientazione — un controllo euristico più economico
+   (basato sul padding nero tipico delle immagini ruotate) si è rivelato
+   inaffidabile su questi casi, da qui la scelta di controllare sempre
+   tutte le orientazioni invece di provare a indovinare quali immagini ne
+   hanno bisogno. Questo quadruplica il costo GPU del filtro varietà,
+   compensato usando un modello più piccolo (yolo11l invece di yolo11x). Il
+   lato "testa" della bbox persona dipende dalla rotazione applicata (per
+   una rotazione di 180° la testa finisce dal lato opposto della bbox
+   rispetto all'originale, per 90/270° finisce su un lato orizzontale
+   invece che in alto/basso): la funzione head_region_xyxy() lo calcola in
+   base alla trasformazione usata, non assume mai genericamente "in alto".
+   Lo scarto è sull'immagine intera anche se una sola bbox è contaminata:
+   escludere solo quella bbox lascerebbe nell'immagine un monopattino
+   visibile ma non annotato, un falso negativo che confonderebbe il
+   training almeno quanto il problema che si vuole risolvere.
 
 Non copia immagini: scrive un file di testo con un path per riga (relativo a
 data/interim/) delle immagini candidate, e un log con il motivo di scarto di
@@ -60,14 +79,22 @@ COCO_MODEL = config.COCO_MODEL
 COCO_BATCH_SIZE = config.COCO_BATCH_SIZE
 ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
 PERSON_CLASS_ID = config.PERSON_CLASS_ID  # classe "person" in COCO
-RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale l'annotazione probabilmente include il conducente
+RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale la coppia va controllata più a fondo (v. HEAD_OVERLAP_THRESHOLD)
+HEAD_REGION_FRACTION = config.HEAD_REGION_FRACTION  # frazione (dal lato testa) della bbox persona considerata regione testa/spalle
+HEAD_OVERLAP_THRESHOLD = config.HEAD_OVERLAP_THRESHOLD  # frazione della regione testa/spalle coperta dalla bbox escooter oltre la quale si conferma la contaminazione
+# Lato della bbox persona verso cui si trova la testa, per ciascuna rotazione applicata all'immagine
+# (dedotto dalle formule di rotate_point: un punto vicino al bordo "alto" dell'originale, y=0,
+# finisce su un lato diverso a seconda della trasformazione). ('asse', 'estremo').
+HEAD_SIDE_BY_DEGREES = {0: ("y", "min"), 90: ("x", "min"), 180: ("y", "max"), 270: ("x", "max")}
+PHASH_CACHE_PATH = config.PHASH_CACHE_PATH
 VARIETY_CACHE_PATH = config.VARIETY_CACHE_PATH
 VARIETY_CACHE_SAVE_EVERY = config.VARIETY_CACHE_SAVE_EVERY  # batch tra un salvataggio incrementale della cache e il successivo
 VARIETY_MIN_INSTANCES = config.VARIETY_MIN_INSTANCES  # istanze COCO minime nell'orientazione originale perché un'immagine sia di buona varietà
 
 
 def load_datasets() -> list[dict]:
-    return [e for e in dataset_index.load_index() if e.get("dedup_dir")]
+    enabled = dataset_index.enabled_ids()
+    return [e for e in dataset_index.load_index() if e.get("dedup_dir") and e["id"] in enabled]
 
 
 def escooter_class_indices(entry: dict, names: list[str]) -> set:
@@ -157,12 +184,34 @@ class UnionFind:
             self.parent[ra] = rb
 
 
-def phash_ints(items: list) -> np.ndarray:
-    """Perceptual hash di ogni immagine, come interi a 64 bit (per confronto vettorizzato)."""
+def phash_ints(items: list, cache_path: Path = PHASH_CACHE_PATH, refresh_cache: bool = False) -> np.ndarray:
+    """Perceptual hash di ogni immagine, come interi a 64 bit (per confronto
+    vettorizzato). Cache su disco per (dataset, split, nome immagine), come
+    per le detection YOLO dello stadio variety: rigirare la pipeline dopo
+    aver aggiunto un dataset non richiede più di rihashare le immagini già
+    processate in una run precedente."""
+    cache = load_json_cache(cache_path)
+
+    if refresh_cache:
+        to_hash = items
+    else:
+        to_hash = [it for it in items
+                   if cache_key(it) not in cache
+                   or not cache_entry_is_valid(cache[cache_key(it)], it["image_path"])]
+
+    if to_hash:
+        print(f"Perceptual hash: {len(items) - len(to_hash)}/{len(items)} immagini già in cache, "
+              f"calcolo su {len(to_hash)}.")
+        for item in to_hash:
+            stat = item["image_path"].stat()
+            with Image.open(item["image_path"]) as im:
+                phash_hex = str(imagehash.phash(im))
+            cache[cache_key(item)] = {"mtime": stat.st_mtime, "size": stat.st_size, "phash": phash_hex}
+        save_json_cache(cache, cache_path)
+
     values = np.empty(len(items), dtype=np.uint64)
     for i, item in enumerate(items):
-        with Image.open(item["image_path"]) as im:
-            values[i] = np.uint64(int(str(imagehash.phash(im)), 16))
+        values[i] = np.uint64(int(cache[cache_key(item)]["phash"], 16))
     return values
 
 
@@ -184,11 +233,12 @@ def cluster_near_duplicates(hashes: np.ndarray, threshold: int, chunk_size: int 
     return uf
 
 
-def dedupe_cross_dataset(items: list, log: list) -> list:
+def dedupe_cross_dataset(
+    items: list, log: list, refresh_cache: bool = False, cache_path: Path = PHASH_CACHE_PATH,
+) -> list:
     if not items:
         return items
-    print(f"Calcolo perceptual hash su {len(items)} immagini...")
-    hashes = phash_ints(items)
+    hashes = phash_ints(items, cache_path=cache_path, refresh_cache=refresh_cache)
     uf = cluster_near_duplicates(hashes, PHASH_DISTANCE_THRESHOLD)
 
     groups: dict = {}
@@ -228,6 +278,22 @@ def containment_ratio(box_xyxy: tuple, other_xyxy: tuple) -> float:
     return inter / area if area > 0 else 0.0
 
 
+def head_region_xyxy(person_xyxy: tuple, deg: int, frac: float) -> tuple:
+    """Sotto-rettangolo di person_xyxy (bbox 'persona', già nell'orientazione
+    deg) corrispondente alla regione testa/spalle: la striscia larga `frac`
+    (0..1) dal lato in cui finisce la testa dopo la rotazione applicata
+    all'immagine (v. HEAD_SIDE_BY_DEGREES) — non necessariamente il lato
+    "in alto", perché una rotazione di 180° sposta la testa in basso e una
+    di 90/270° la sposta su un lato orizzontale."""
+    x1, y1, x2, y2 = person_xyxy
+    axis, end = HEAD_SIDE_BY_DEGREES[deg]
+    if axis == "y":
+        h = y2 - y1
+        return (x1, y1, x2, y1 + frac * h) if end == "min" else (x1, y2 - frac * h, x2, y2)
+    w = x2 - x1
+    return (x1, y1, x1 + frac * w, y2) if end == "min" else (x2 - frac * w, y1, x2, y2)
+
+
 def rotate_point(x: float, y: float, w: int, h: int, const) -> tuple:
     """Coordinate di (x, y) — punto in un'immagine w x h — dopo
     Image.transpose(const). Formule verificate empiricamente (vedi PIL
@@ -250,22 +316,22 @@ def rotate_box(box_xyxy: tuple, w: int, h: int, const) -> tuple:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def variety_cache_key(item: dict) -> str:
+def cache_key(item: dict) -> str:
     return rel_label(item)
 
 
-def load_variety_cache(path: Path) -> dict:
+def load_json_cache(path: Path) -> dict:
     if not path.exists():
         return {}
     return json.loads(path.read_text())
 
 
-def save_variety_cache(cache: dict, path: Path) -> None:
+def save_json_cache(cache: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(cache, indent=2))
 
 
-def variety_cache_is_valid(entry: dict, image_path: Path) -> bool:
+def cache_entry_is_valid(entry: dict, image_path: Path) -> bool:
     """Un'immagine può cambiare contenuto pur mantenendo lo stesso path se il
     dataset viene rigenerato (es. dedupe_augmented sceglie un "keeper" diverso
     tra una run e l'altra): si invalida la entry se mtime/dimensione del file
@@ -307,14 +373,14 @@ def apply_variety_filter(
     un dataset non richiede più di rifare l'inferenza sulle immagini già
     processate in una run precedente."""
     subset = items[:limit] if limit else items
-    cache = load_variety_cache(cache_path)
+    cache = load_json_cache(cache_path)
 
     if refresh_cache:
         to_infer = subset
     else:
         to_infer = [it for it in subset
-                    if variety_cache_key(it) not in cache
-                    or not variety_cache_is_valid(cache[variety_cache_key(it)], it["image_path"])]
+                    if cache_key(it) not in cache
+                    or not cache_entry_is_valid(cache[cache_key(it)], it["image_path"])]
 
     if to_infer:
         from tqdm import tqdm
@@ -342,7 +408,7 @@ def apply_variety_filter(
                     result0 = results_by_deg[0][i]
                     h_px, w_px = result0.orig_shape
                     stat = item["image_path"].stat()
-                    cache[variety_cache_key(item)] = {
+                    cache[cache_key(item)] = {
                         "mtime": stat.st_mtime,
                         "size": stat.st_size,
                         "orig_shape": [h_px, w_px],
@@ -352,14 +418,14 @@ def apply_variety_filter(
                     }
 
                 if (batch_i + 1) % VARIETY_CACHE_SAVE_EVERY == 0:
-                    save_variety_cache(cache, cache_path)
+                    save_json_cache(cache, cache_path)
         finally:
-            save_variety_cache(cache, cache_path)
+            save_json_cache(cache, cache_path)
 
     survivors = []
     flagged_rider = []
     for item in subset:
-        entry = cache[variety_cache_key(item)]
+        entry = cache[cache_key(item)]
         h_px, w_px = entry["orig_shape"]
         detections_by_deg = {int(deg): dets for deg, dets in entry["detections"].items()}
 
@@ -375,8 +441,14 @@ def apply_variety_filter(
                 continue
             for esc in item["escooter_boxes"]:
                 esc_xyxy = rotate_box(escooter_box_pixel_xyxy(esc, w_px, h_px), w_px, h_px, const)
-                if max(containment_ratio(esc_xyxy, p) for p in person_boxes) >= RIDER_OVERLAP_THRESHOLD:
-                    contaminated = True
+                for p in person_boxes:
+                    if containment_ratio(esc_xyxy, p) < RIDER_OVERLAP_THRESHOLD:
+                        continue
+                    head = head_region_xyxy(p, deg, HEAD_REGION_FRACTION)
+                    if containment_ratio(head, esc_xyxy) >= HEAD_OVERLAP_THRESHOLD:
+                        contaminated = True
+                        break
+                if contaminated:
                     break
             if contaminated:
                 break
@@ -428,10 +500,12 @@ def main():
                          help="Limita lo stadio variety alle prime N immagini sopravvissute (per test su campione)")
     parser.add_argument("--refresh-variety-cache", action="store_true",
                          help="Ignora la cache delle detection YOLO dello stadio variety e ricalcola tutto da zero")
+    parser.add_argument("--refresh-phash-cache", action="store_true",
+                         help="Ignora la cache dei perceptual hash dello stadio dedup e ricalcola tutto da zero")
     args = parser.parse_args()
 
     datasets = load_datasets()
-    print(f"{len(datasets)} dataset deduplicati trovati nell'indice.")
+    print(f"{len(datasets)} dataset abilitati e deduplicati trovati nell'indice.")
 
     items = list(iter_candidate_images(datasets))
     print(f"{len(items)} immagini totali nel pool di partenza.")
@@ -446,7 +520,7 @@ def main():
         return
 
     before = len(survivors)
-    survivors = dedupe_cross_dataset(survivors, log)
+    survivors = dedupe_cross_dataset(survivors, log, refresh_cache=args.refresh_phash_cache)
     print(f"Dopo la dedup cross-dataset: {len(survivors)}/{before} immagini sopravvissute "
           f"({before - len(survivors)} quasi-duplicati scartati).")
 

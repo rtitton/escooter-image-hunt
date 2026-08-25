@@ -1,13 +1,13 @@
-status,workspace_id,project_id,version,escooter_class_name,notes
-null,kdigital,electric-scooter-cd7hw,,electric scooter,
-null,1-rtt72,scooter-etuqi,,19,
-null,sunjune-kim,kick-scooter-3,,0|1,
-null,capstone-design-project,electric-scooter-dpwkl,,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,
-null,riccardo-sutxi,electric-scooters-02-od-hcoce,,e-scooter,
-null,riccardo-sutxi,scooter-ddkei-tlsoa,,kickboard|purple kickboard|scooter,
-null,riccardo-sutxi,e-scooters-detection-base-new,,e-scooter,
-null,susu-qqtjxscooter-giugk,scooter|null,, poche immagini ma di buona qualita
-null,computer-vision-dibh7,scooter-31wb6,,scooter,molto interessante-immagini-a-campo-largo
-null,sec-l21ei,mnstr-datast-new-tst,1,e-scooter,quasi 10k immagini - versione senza aug presente
-ignore,genai-3dila,electric-scooters-02-od,,e-scooter,forked to riccardo-sutxi/electric-scooters-02-od-hcoce,
-ignore,jihoon-xw2ya,scooter-ddkei,,scooter,forked to riccardo-sutxi/scooter-ddkei-tlsoa,
+enabled,download,workspace_id,project_id,version,escooter_class_name,notes
+1,0,kdigital,electric-scooter-cd7hw,,electric scooter,
+1,0,1-rtt72,scooter-etuqi,,19,
+1,0,sunjune-kim,kick-scooter-3,,0|1,
+1,0,capstone-design-project,electric-scooter-dpwkl,,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,
+1,0,riccardo-sutxi,electric-scooters-02-od-hcoce,,e-scooter,
+1,0,riccardo-sutxi,scooter-ddkei-tlsoa,,kickboard|purple kickboard|scooter,
+1,0,riccardo-sutxi,e-scooters-detection-base-new,,e-scooter,
+1,0,susu-qqtjxscooter-giugk,scooter|null,, poche immagini ma di buona qualita
+1,0,computer-vision-dibh7,scooter-31wb6,,scooter,molto interessante-immagini-a-campo-largo
+1,0,sec-l21ei,mnstr-datast-new-tst,1,e-scooter,quasi 10k immagini - versione senza aug presente
+0,-1,genai-3dila,electric-scooters-02-od,,e-scooter,forked to riccardo-sutxi/electric-scooters-02-od-hcoce,
+0,-1,jihoon-xw2ya,scooter-ddkei,,scooter,forked to riccardo-sutxi/scooter-ddkei-tlsoa,

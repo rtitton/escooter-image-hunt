@@ -50,33 +50,34 @@ manuale finale (vedi le sezioni sotto per il dettaglio di ogni passo e le
 opzioni disponibili).
 
 ```bash
+PYTHONCMD=uv run python3
 # 1. Popolare data/datasets_to_download.csv (righe status=todo), poi
 #    download + dedupe in batch per tutte le righe todo (chiama
 #    internamente download_dataset.py e dedupe_augmented.py per ognuna:
 #    non vanno lanciati a mano in questo flusso)
-python3 scripts/download_batch.py
+$PYTHONCMD scripts/download_batch.py
 
 # 2. Selezione delle immagini candidate su tutti i dataset deduplicati registrati
-python3 scripts/select_images.py
+$PYTHONCMD scripts/select_images.py
 
 # 3. Costruzione del dataset di unione dalle candidate (classe escooter rimappata a 80)
-python3 scripts/build_union_dataset.py
+$PYTHONCMD scripts/build_union_dataset.py
 
 #    ...e delle immagini flaggate per conducente incluso, per la correzione manuale
-python3 scripts/build_union_dataset.py --candidates-file data/flagged_rider_contamination.txt \
-    --out-dir data/processed/rider_review
+$PYTHONCMD scripts/build_union_dataset.py --candidates-file data/flagged_rider_contamination.txt \
+    --out-dir data/processed/flagged_rider_contamination
 
 # 3b. (opzionale, indipendente dal passo 3) estrae le candidate mantenendo i
 #     dataset sorgente separati e le classi originali (senza remap a 80),
 #     in data/interim/<id>-selected/ — utile per ispezionare la selezione
 #     dataset per dataset
-python3 scripts/build_selected_datasets.py
+$PYTHONCMD scripts/build_selected_datasets.py
 
-# 4. Campione per controllo visivo del dataset di unione
-python3 scripts/visual_check_sample.py
+# 4. (opzionale) Campione per controllo visivo del dataset di unione
+$PYTHONCMD scripts/build_visual_check_sample.py
 
-# 5. Selezione manuale finale (apre http://localhost:8765)
-python3 scripts/review_app.py
+# 5. Web app per review manuale di un dataset in formato yolo con struttura base/images base/labels. (http://localhost:8765)
+$PYTHONCMD scripts/review_app.py
 ```
 
 `download_dataset.py` e `dedupe_augmented.py` (sezioni 1 e 2 sotto) restano
@@ -226,7 +227,7 @@ python3 scripts/build_union_dataset.py [--candidates-file ...] [--out-dir ...] [
 Sull'ultimo run completo: 2772/2772 candidate copiate in `data/processed/union/`,
 1955/1955 flaggate copiate in `data/processed/rider_review/`.
 
-## 5. Campione per controllo visivo — `visual_check_sample.py`
+## 5. Campione per controllo visivo — `build_visual_check_sample.py`
 
 Esporta un campione casuale del dataset di unione con la bbox disegnata, per
 intercettare a colpo d'occhio i problemi più macroscopici (box palesemente

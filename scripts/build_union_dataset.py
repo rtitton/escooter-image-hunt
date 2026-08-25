@@ -52,6 +52,7 @@ def main():
     log_path = DATA_ROOT / "logs" / f"build_union_dataset-{args.candidates_file.stem}.log"
     candidates = load_candidates(args.candidates_file, args.limit)
     entries = {e["id"]: e for e in dataset_index.load_index()}
+    enabled = dataset_index.enabled_ids()
 
     out_images = args.out_dir / "images"
     out_labels = args.out_dir / "labels"
@@ -68,10 +69,14 @@ def main():
 
     names_cache: dict[str, list[str]] = {}
     skipped_no_escooter = []
+    skipped_disabled = []
     copied = 0
 
     for rel in candidates:
         dataset_id, split, _, filename = rel.split("/")
+        if dataset_id not in enabled:
+            skipped_disabled.append(rel)
+            continue
         entry = entries[dataset_id]
         dedup_dir = DATA_ROOT.parent / entry["dedup_dir"]
         img_path = dedup_dir / split / "images" / filename
@@ -100,12 +105,17 @@ def main():
     if skipped_no_escooter:
         print(f"ATTENZIONE: {len(skipped_no_escooter)} candidate senza istanze escooter nel label "
               f"(inatteso: select_images.py le avrebbe dovute scartare a monte).")
+    if skipped_disabled:
+        print(f"{len(skipped_disabled)} candidate saltate perché il dataset sorgente ha enabled=0 "
+              f"(inatteso: select_images.py le avrebbe dovute escludere a monte).")
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text(
         f"# Log build_union_dataset ({copied}/{len(candidates)} copiate da {args.candidates_file} in {args.out_dir})\n\n"
         f"## Candidate senza istanze escooter, saltate ({len(skipped_no_escooter)})\n"
-        + "\n".join(skipped_no_escooter) + "\n"
+        + "\n".join(skipped_no_escooter) + "\n\n"
+        f"## Candidate con dataset sorgente disabilitato (enabled=0), saltate ({len(skipped_disabled)})\n"
+        + "\n".join(skipped_disabled) + "\n"
     )
     print(f"Log scritto in {log_path}")
 

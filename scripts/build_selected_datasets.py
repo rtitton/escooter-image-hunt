@@ -55,6 +55,7 @@ def main():
     candidates = load_candidates(args.candidates_file, args.limit)
     grouped = group_by_dataset(candidates)
     entries = {e["id"]: e for e in dataset_index.load_index()}
+    enabled = dataset_index.enabled_ids()
 
     log_lines = []
     total_copied = 0
@@ -64,6 +65,10 @@ def main():
         if entry is None or not entry.get("dedup_dir"):
             log_lines.append(f"SALTATO dataset {dataset_id}: non trovato nell'indice o privo di dedup_dir")
             print(f"ATTENZIONE: dataset {dataset_id} non trovato nell'indice o privo di dedup_dir, saltato.")
+            continue
+        if dataset_id not in enabled:
+            log_lines.append(f"SALTATO dataset {dataset_id}: enabled=0 in {config.CSV_PATH.name}")
+            print(f"Dataset {dataset_id} disabilitato (enabled=0), saltato.")
             continue
 
         dedup_dir = DATA_ROOT.parent / entry["dedup_dir"]
