@@ -16,19 +16,16 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
 4. scarto delle immagini in cui una bbox escooter include il conducente:
    alcuni dataset sorgente annotano l'intera persona invece del solo
    monopattino, il che confonderebbe il training rispetto alla classe
-   "persona". Un monopattino in piedi ha però una sua bbox naturalmente
-   alta e stretta (dalle ruote al manubrio, che su un adulto arriva spesso
-   all'altezza di petto/vita), che si sovrappone per il 50-90% con la bbox
-   di una persona COCO anche quando l'annotazione originale include
-   correttamente solo il monopattino: la sola frazione di area coperta
-   (containment_ratio) non distingue quindi "il manubrio è alto" da
-   "l'annotazione include il conducente". Per discriminare i due casi si
-   richiede in aggiunta che la bbox escooter copra una parte sostanziale
-   della regione testa/spalle della persona (i primi HEAD_REGION_FRACTION,
-   dal lato della testa, della sua bbox): solo un'annotazione che si
-   estende fin lassù è probabilmente contaminata, mentre una bbox che si
-   ferma a vita/petto riflette la normale altezza del manubrio. Il
-   controllo è ripetuto su tutte e 4 le orientazioni (0/90/180/270°) e non
+   "persona". Si considera contaminata una coppia di bbox escooter/persona
+   che si sovrappongono per almeno RIDER_OVERLAP_THRESHOLD (frazione
+   dell'area della bbox escooter coperta dall'intersezione, v.
+   containment_ratio()) e in cui la bbox escooter è più alta della bbox
+   persona (rapporto fra le due altezze > RIDER_HEIGHT_RATIO_THRESHOLD):
+   un'annotazione che include il conducente supera in altezza quella, più
+   accurata, stimata dal modello COCO per la sola persona; il precondition
+   di sovrapposizione evita di confrontare le altezze di una bbox escooter
+   e di una persona che si trovano in punti diversi dell'immagine e non
+   hanno nulla a che vedere fra loro. Il controllo è ripetuto su tutte e 4 le orientazioni (0/90/180/270°) e non
    solo su quella originale: alcune immagini sorgente sono ruotate/flippate
    rispetto al contenuto reale (una persona in piedi appare sdraiata nel
    frame), e un rilevatore addestrato su foto diritte spesso manca la
@@ -37,12 +34,7 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
    inaffidabile su questi casi, da qui la scelta di controllare sempre
    tutte le orientazioni invece di provare a indovinare quali immagini ne
    hanno bisogno. Questo quadruplica il costo GPU del filtro varietà,
-   compensato usando un modello più piccolo (yolo11l invece di yolo11x). Il
-   lato "testa" della bbox persona dipende dalla rotazione applicata (per
-   una rotazione di 180° la testa finisce dal lato opposto della bbox
-   rispetto all'originale, per 90/270° finisce su un lato orizzontale
-   invece che in alto/basso): la funzione head_region_xyxy() lo calcola in
-   base alla trasformazione usata, non assume mai genericamente "in alto".
+   compensato usando un modello più piccolo (yolo11l invece di yolo11x).
    Lo scarto è sull'immagine intera anche se una sola bbox è contaminata:
    escludere solo quella bbox lascerebbe nell'immagine un monopattino
    visibile ma non annotato, un falso negativo che confonderebbe il
@@ -77,15 +69,11 @@ MIN_PIXELS = config.MIN_PIXELS  # dimensione minima immagine (larghezza*altezza)
 PHASH_DISTANCE_THRESHOLD = config.PHASH_DISTANCE_THRESHOLD  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
 COCO_MODEL = config.COCO_MODEL
 COCO_BATCH_SIZE = config.COCO_BATCH_SIZE
-ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
+# ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
+ROTATIONS = {0: None, 180: Image.ROTATE_180}
 PERSON_CLASS_ID = config.PERSON_CLASS_ID  # classe "person" in COCO
-RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" oltre la quale la coppia va controllata più a fondo (v. HEAD_OVERLAP_THRESHOLD)
-HEAD_REGION_FRACTION = config.HEAD_REGION_FRACTION  # frazione (dal lato testa) della bbox persona considerata regione testa/spalle
-HEAD_OVERLAP_THRESHOLD = config.HEAD_OVERLAP_THRESHOLD  # frazione della regione testa/spalle coperta dalla bbox escooter oltre la quale si conferma la contaminazione
-# Lato della bbox persona verso cui si trova la testa, per ciascuna rotazione applicata all'immagine
-# (dedotto dalle formule di rotate_point: un punto vicino al bordo "alto" dell'originale, y=0,
-# finisce su un lato diverso a seconda della trasformazione). ('asse', 'estremo').
-HEAD_SIDE_BY_DEGREES = {0: ("y", "min"), 90: ("x", "min"), 180: ("y", "max"), 270: ("x", "max")}
+RIDER_OVERLAP_THRESHOLD = config.RIDER_OVERLAP_THRESHOLD  # frazione dell'area della bbox escooter coperta da una detection "persona" perché la coppia sia considerata (precondizione spaziale prima del confronto altezze)
+RIDER_HEIGHT_RATIO_THRESHOLD = config.RIDER_HEIGHT_RATIO_THRESHOLD  # rapporto (altezza escooter / altezza persona) oltre il quale si considera il conducente incluso nell'annotazione
 PHASH_CACHE_PATH = config.PHASH_CACHE_PATH
 VARIETY_CACHE_PATH = config.VARIETY_CACHE_PATH
 VARIETY_CACHE_SAVE_EVERY = config.VARIETY_CACHE_SAVE_EVERY  # batch tra un salvataggio incrementale della cache e il successivo
@@ -94,6 +82,7 @@ VARIETY_MIN_INSTANCES = config.VARIETY_MIN_INSTANCES  # istanze COCO minime nell
 
 def load_datasets() -> list[dict]:
     enabled = dataset_index.enabled_ids()
+    print(f"enabled: {enabled}")
     return [e for e in dataset_index.load_index() if e.get("dedup_dir") and e["id"] in enabled]
 
 
@@ -278,22 +267,6 @@ def containment_ratio(box_xyxy: tuple, other_xyxy: tuple) -> float:
     return inter / area if area > 0 else 0.0
 
 
-def head_region_xyxy(person_xyxy: tuple, deg: int, frac: float) -> tuple:
-    """Sotto-rettangolo di person_xyxy (bbox 'persona', già nell'orientazione
-    deg) corrispondente alla regione testa/spalle: la striscia larga `frac`
-    (0..1) dal lato in cui finisce la testa dopo la rotazione applicata
-    all'immagine (v. HEAD_SIDE_BY_DEGREES) — non necessariamente il lato
-    "in alto", perché una rotazione di 180° sposta la testa in basso e una
-    di 90/270° la sposta su un lato orizzontale."""
-    x1, y1, x2, y2 = person_xyxy
-    axis, end = HEAD_SIDE_BY_DEGREES[deg]
-    if axis == "y":
-        h = y2 - y1
-        return (x1, y1, x2, y1 + frac * h) if end == "min" else (x1, y2 - frac * h, x2, y2)
-    w = x2 - x1
-    return (x1, y1, x1 + frac * w, y2) if end == "min" else (x2 - frac * w, y1, x2, y2)
-
-
 def rotate_point(x: float, y: float, w: int, h: int, const) -> tuple:
     """Coordinate di (x, y) — punto in un'immagine w x h — dopo
     Image.transpose(const). Formule verificate empiricamente (vedi PIL
@@ -358,12 +331,13 @@ def apply_variety_filter(
     """Scarta le immagini in cui il modello YOLO pretrained COCO rileva meno
     di VARIETY_MIN_INSTANCES istanze nell'orientazione originale (COCO non ha
     una classe escooter, quindi ogni rilevamento conta come 'varietà'), e separa quelle
-    in cui almeno una bbox escooter è per lo più coperta da una detection
-    'persona' (probabile conducente incluso nell'annotazione sorgente).
-    Il controllo di sovrapposizione persona/bbox è ripetuto su tutte e 4 le
-    orientazioni (0/90/180/270°), non solo quella originale, perché alcune
-    immagini sorgente sono ruotate/flippate e un rilevatore addestrato su
-    foto diritte spesso manca la persona in quell'orientazione. L'intera
+    in cui almeno una bbox escooter si sovrappone per almeno RIDER_OVERLAP_THRESHOLD
+    a una detection 'persona' ed è più alta di RIDER_HEIGHT_RATIO_THRESHOLD
+    volte quella persona (probabile conducente incluso nell'annotazione
+    sorgente). Il controllo sovrapposizione+altezza escooter/persona è ripetuto su tutte
+    e 4 le orientazioni (0/90/180/270°), non solo quella originale, perché
+    alcune immagini sorgente sono ruotate/flippate e un rilevatore addestrato
+    su foto diritte spesso manca la persona in quell'orientazione. L'intera
     immagine viene esclusa anche se una sola bbox è contaminata, per non
     lasciare monopattini visibili ma non annotati. Ritorna (sopravvissute,
     flaggate per conducente incluso).
@@ -441,12 +415,13 @@ def apply_variety_filter(
                 continue
             for esc in item["escooter_boxes"]:
                 esc_xyxy = rotate_box(escooter_box_pixel_xyxy(esc, w_px, h_px), w_px, h_px, const)
+                esc_height = esc_xyxy[3] - esc_xyxy[1]
                 for p in person_boxes:
                     if containment_ratio(esc_xyxy, p) < RIDER_OVERLAP_THRESHOLD:
                         continue
-                    head = head_region_xyxy(p, deg, HEAD_REGION_FRACTION)
-                    if containment_ratio(head, esc_xyxy) >= HEAD_OVERLAP_THRESHOLD:
+                    if esc_height / (p[3] - p[1]) > RIDER_HEIGHT_RATIO_THRESHOLD:
                         contaminated = True
+                        log.append(f"FLAGGATA {rel_label(item)}  (bbox escooter {esc_xyxy} sovrapposta a persona {p} in orientazione {deg}°)(altezza escooter {esc_height:.1f} / altezza persona {p[3] - p[1]:.1f} > {RIDER_HEIGHT_RATIO_THRESHOLD})")
                         break
                 if contaminated:
                     break

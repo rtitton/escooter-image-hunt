@@ -44,6 +44,7 @@ def enabled_ids() -> set[str]:
     data/datasets_to_download.csv. Usato per escludere dai passi di
     elaborazione i dataset disabilitati senza doverli rimuovere dall'indice."""
     with CSV_PATH.open(newline="", encoding="utf-8") as f:
+        print(f"Indice CSV dei dataset utilizzato: {CSV_PATH}")
         reader = csv.DictReader(f)
         return {
             f"{row['project_id']}-v{row['version']}"

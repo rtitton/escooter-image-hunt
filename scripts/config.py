@@ -37,6 +37,7 @@ PHASH_CACHE_PATH = DATA_ROOT / os.environ.get("PHASH_CACHE_FILENAME", "cache/pha
 SELECT_IMAGES_LOG_PATH = DATA_ROOT / os.environ.get("SELECT_IMAGES_LOG_FILENAME", "logs/select_images.log")
 UNION_DIR = DATA_ROOT / os.environ.get("UNION_DIRNAME", "processed/union")
 UNION_REVIEW_SAMPLE_DIR = DATA_ROOT / os.environ.get("UNION_REVIEW_SAMPLE_DIRNAME", "processed/union_review_sample")
+RIDER_CONTAMINATED_DIR = DATA_ROOT / os.environ.get("RIDER_CONTAMINATED_DIRNAME", "processed/rider_contaminated")
 
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
@@ -46,9 +47,8 @@ PERSON_CLASS_ID = _env_int("PERSON_CLASS_ID", 0)  # classe "person" in COCO
 CLOSEUP_AREA_THRESHOLD = _env_float("CLOSEUP_AREA_THRESHOLD", 0.4)
 MIN_PIXELS = _env_int("MIN_PIXELS", 160_000)
 PHASH_DISTANCE_THRESHOLD = _env_int("PHASH_DISTANCE_THRESHOLD", 8)
-RIDER_OVERLAP_THRESHOLD = _env_float("RIDER_OVERLAP_THRESHOLD", 0.5)
-HEAD_REGION_FRACTION = _env_float("HEAD_REGION_FRACTION", 0.25)  # frazione (dal lato "testa") della bbox persona considerata regione testa/spalle
-HEAD_OVERLAP_THRESHOLD = _env_float("HEAD_OVERLAP_THRESHOLD", 0.5)  # frazione della regione testa/spalle coperta dalla bbox escooter oltre la quale si conferma la contaminazione
+RIDER_OVERLAP_THRESHOLD = _env_float("RIDER_OVERLAP_THRESHOLD", 0.3)  # frazione dell'area della bbox escooter coperta da una detection "persona" perché la coppia sia considerata (precondizione spaziale prima del confronto altezze)
+RIDER_HEIGHT_RATIO_THRESHOLD = _env_float("RIDER_HEIGHT_RATIO_THRESHOLD", 1.0)  # rapporto (altezza escooter / altezza persona) oltre il quale si considera il conducente incluso nell'annotazione
 
 # --- Modello varietà COCO (select_images.py) ---
 COCO_MODEL = os.environ.get("COCO_MODEL", "yolo11l.pt")
@@ -63,6 +63,7 @@ EDGE_SAMPLE = _env_int("EDGE_SAMPLE", 30)
 # --- Controllo visivo campione (build_visual_check_sample.py) ---
 BOX_COLOR = tuple(int(v) for v in os.environ.get("BOX_COLOR", "255,0,0").split(","))
 BOX_WIDTH = _env_int("BOX_WIDTH", 4)
+PERSON_BOX_COLOR = tuple(int(v) for v in os.environ.get("PERSON_BOX_COLOR", "0,255,0").split(","))
 
 # --- App di revisione (review_app.py) ---
 REVIEW_APP_PORT = _env_int("REVIEW_APP_PORT", 8765)
