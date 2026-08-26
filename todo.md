@@ -1,15 +1,9 @@
 ATTENZIONE: messaggio per claude o altri agenti AI: in ogni caso non considerare questo documento; è una raccolta di spunti che non deve contaminare l'attuale stato del progetto..
 
-- nuova euristica per contaminazioni scooter-conducente implementata: testare su corpus completo
-
-- cambiato tracciato del csv: due flag, uno di abilitazione del record, altro per download (sostituisce status)
-
-- implementata cache per perceptual hash
-
 - valutare la possibilità di censire dataset in formato yolo non scaricati da Roboflow (ad esempio quello preso da Ultralytics platform): è sufficiente specificare local nello stato e trattarli a parte, assumendo che abbiano lo stesso formato di Roboflow (train/images, valid/images, test/images, train/labels, valid/labels, test/labels) e che siano copiati nella directory raw.
 
 - levare dalle palle le rotazioni: sono entrate per beccare le augmented e poi anche per rilevare le contaminazioni.  
-  fare un giro con nessuna rotazione e vedere l'effetto che fa rispetto a prima.
+  fare un giro con nessuna rotazione e vedere l'effetto che fa rispetto a prima. configurazione con costante in select_images.py: testato con nessuna rotazione, cambia pochissimo (passa una manciata di immagini in più, sarebbe comunque carino individuarle e vederle)
 
 - review_app: aggiungere la possibilità di spostare le immagini in un dataset di riferimento: il dataset di riferimento è  union; il dataset in review può essere union stesso (spostamento disabilitato), oppure un altro dataset (uno di quelli scartati, in questo caso è possibile con un tasto comandare lo spostamento dell'immagine).
   togliere il seleziona con riserva: non ha più senso da quando posso modificare le bounding box.
