@@ -72,11 +72,14 @@ def main():
     skipped_disabled = []
     copied = 0
 
+    # Copia le immagini candidate e scrive i file di label con le sole istanze escooter
     for rel in candidates:
         dataset_id, split, _, filename = rel.split("/")
+        # valuta abilitazione del dataset: ha senso perché il dataset potrebbe essere stato scaricato e trattato e solo successivamente escluso
         if dataset_id not in enabled:
             skipped_disabled.append(rel)
             continue
+            
         entry = entries[dataset_id]
         dedup_dir = DATA_ROOT.parent / entry["dedup_dir"]
         img_path = dedup_dir / split / "images" / filename
