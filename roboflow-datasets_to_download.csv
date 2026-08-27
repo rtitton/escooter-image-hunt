@@ -3,10 +3,13 @@ enabled,download,workspace_id,project_id,version,escooter_class_name,notes
 1,0,1-rtt72,scooter-etuqi,,19,
 1,0,sunjune-kim,kick-scooter-3,,0|1,
 1,0,capstone-design-project,electric-scooter-dpwkl,,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,
-1,0,riccardo-sutxi,electric-scooters-02-od-hcoce,,e-scooter,
-1,0,riccardo-sutxi,scooter-ddkei-tlsoa,,kickboard|purple kickboard|scooter,
+1,0,riccardo-sutxi,electric-scooters-02-od-hcoce,,e-scooter,forked da genai-3dila che non aveva versioni
+1,0,riccardo-sutxi,scooter-ddkei-tlsoa,,kickboard|purple kickboard|scooter,forker da jihoon-xw2ya che non aveva versioni
 1,0,riccardo-sutxi,e-scooters-detection-base-new,,e-scooter,
+1,1,riccardo-sutxi,6-18-hwgsn,,kickboard, forked da -njpg8/6-18 - solo 200 imgs ma buona qualita - no bbox ma masks
 1,0,computer-vision-dibh7,scooter-31wb6,,scooter,molto interessante-immagini-a-campo-largo
 1,0,sec-l21ei,mnstr-datast-new-tst,1,e-scooter,quasi 10k immagini - versione senza aug presente
-0,-1,genai-3dila,electric-scooters-02-od,,e-scooter,forked to riccardo-sutxi/electric-scooters-02-od-hcoce,
-0,-1,jihoon-xw2ya,scooter-ddkei,,scooter,forked to riccardo-sutxi/scooter-ddkei-tlsoa,
+1,0,delivery,trott,2,electric scooter, 9k senza aug - maggior parte vengono scremate da deduplicazione
+1,0,p4p-mju3n,p4p-0xslh,3,0, 12k con aug - molte vengono scremate da deduplicazione
+1,0,jihyung-kim,pm-hpp,1,PM-hpp, 364i - conducenti con elmetto - imgs abbastanza originali
+0,0,kickboard-c0lo3,kickboard-a75qx,,person_with_kickboard|2+person_with_kickboard, 441i - abbastanza originale - purtroppo annota attrezzo+persone
