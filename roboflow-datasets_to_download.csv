@@ -13,3 +13,5 @@ enabled,download,workspace_id,project_id,version,escooter_class_name,notes
 1,0,p4p-mju3n,p4p-0xslh,3,0, 12k con aug - molte vengono scremate da deduplicazione
 1,0,jihyung-kim,pm-hpp,1,PM-hpp, 364i - conducenti con elmetto - imgs abbastanza originali
 0,0,kickboard-c0lo3,kickboard-a75qx,,person_with_kickboard|2+person_with_kickboard, 441i - abbastanza originale - purtroppo annota attrezzo+persone
+1,1,kts-data,kickboard-data-drone,,kickboard, 3k immagini - quantità di immagini da drone con escooter piccoli e molto piccoli - masks - andrebbe trattato a parte come sorgente di oggetti piccoli
+1,1,kts-data,-9gklp,,kickboard, 1.6k immagini - probabile sorgente di oggetti piccoli per kickboard-data-drone

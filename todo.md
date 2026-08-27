@@ -1,6 +1,7 @@
 ATTENZIONE: messaggio per claude o altri agenti AI: in ogni caso non considerare questo documento; è una raccolta di spunti che non deve contaminare l'attuale stato del progetto..
 
-- valutare la possibilità di censire dataset in formato yolo non scaricati da Roboflow (ad esempio quello preso da Ultralytics platform): è sufficiente specificare local nello stato e trattarli a parte, assumendo che abbiano lo stesso formato di Roboflow (train/images, valid/images, test/images, train/labels, valid/labels, test/labels) e che siano copiati nella directory raw.
+- aggiungere un parametro per filtrare la dimensione delle bounding box piccole: potrebbe essere una percentuale della dimensione dell'immagine (come già presente per il massimo), oppure una dimensione minima in pixel.  
+  fare un giro con il filtro attivo e vedere l'effetto che fa rispetto a prima. configurazione con costante in select_images.py: testato con filtro attivo, cambia pochissimo (passa una manciata di immagini in più, sarebbe comunque carino individuarle e vederle)
 
 - levare dalle palle le rotazioni: sono entrate per beccare le augmented e poi anche per rilevare le contaminazioni.  
   fare un giro con nessuna rotazione e vedere l'effetto che fa rispetto a prima. configurazione con costante in select_images.py: testato con nessuna rotazione, cambia pochissimo (passa una manciata di immagini in più, sarebbe comunque carino individuarle e vederle)
@@ -13,3 +14,9 @@ ATTENZIONE: messaggio per claude o altri agenti AI: in ogni caso non considerare
 
 
 ATTENZIONE: il ruolo di questo progetto è ben distinto rispetto a yolo-custom: qui si parte da un corpus esteso per ottenere un dataset union al meglio delle possibilità; yolo-custom è una pipeline per aggiungere a un dataset già stabilito, con tecniche di deduplicazione. questo progetto serve a scremare un grosso corpus di immagini, yolo-custom a fare lo step finale per integrarle in un dataset già esistente (esclusione dei simili, annotazione coco, ecc.).
+
+
+DEDICARE UNA SESSIONE A METTERE IN ORDINE UN PO DI COSE
+- evidenziare meglio i vari step nella console: ogni volta che dica dove sta leggendo, quanti file entrano, quanti escono
+- fare un report finale in ogni script meglio delle attuali print.
+Quando fai questo, fai un giro completo e salva i numeri; poi lascia la logica ferma, fai le modifiche di cosmesi, giro completo e confronta i numeri.
