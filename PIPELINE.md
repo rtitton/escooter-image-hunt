@@ -7,15 +7,14 @@ selezione vedi
 [claude-instruct-01-automatic-image-selection.md](claude-instruct-01-automatic-image-selection.md).
 
 ## Panoramica
-Il file è specifico di ogni istanza del progetto e determina il contenuto della directory `data`.  
+Il file `datasets_to_download.csv`, nella root del progetto, contiene l'elenco dei dataset Roboflow da trattare, con il relativo stato (downloaded, todo, ignore, ecc.), e determina il contenuto della directory `data`.  
 La directory `data` contiene i dataset scaricati e tutto il materiale relativo alle elaborazioni successive della pipeline.  
-In particolare contiene il file `datasets_to_download.csv` con l'elenco dei dataset Roboflow da trattare, con il relativo stato (downloaded, todo, ignore, ecc.).  
 
-L'intera directory è inclusa in `.gitignore`, e per riprodurla in una nuova istanza del progetto, è necessario creare il file `data/datasets_to_download.csv` a partire dall'elenco generale dei dataset Roboflow selezionati `roboflow-datasets_to_download.csv`.
+Il file `datasets_to_download.csv` e l'intera directory `data` sono specifici di ogni istanza del progetto e inclusi in `.gitignore`; per riprodurli in una nuova istanza del progetto, è necessario creare il file `datasets_to_download.csv` a partire dall'elenco generale dei dataset Roboflow selezionati `roboflow-datasets_to_download.csv`.
 
 
 ```
-data/datasets_to_download.csv
+datasets_to_download.csv
         │  (download_batch.py)
         ▼
 data/raw/<id>/                    ── un dataset Roboflow per id, invariato
@@ -51,11 +50,15 @@ opzioni disponibili).
 
 ```bash
 PYTHONCMD=uv run python3
-# 1. Popolare data/datasets_to_download.csv (righe status=todo), poi
-#    download + dedupe in batch per tutte le righe todo (chiama
+# 1. Popolare datasets_to_download.csv (righe enabled=1, download=1), poi
+#    download + dedupe in batch per tutte quelle righe (chiama
 #    internamente download_dataset.py e dedupe_augmented.py per ognuna:
 #    non vanno lanciati a mano in questo flusso)
 $PYTHONCMD scripts/download_batch.py
+
+# 1c. (opzionale, utile lavorando su più macchine) verifica che i dataset
+#     previsti dal CSV siano tutti presenti nell'indice/su disco locali
+$PYTHONCMD scripts/check_dataset_sync.py
 
 # 2. Selezione delle immagini candidate su tutti i dataset deduplicati registrati
 $PYTHONCMD scripts/select_images.py
@@ -107,24 +110,45 @@ python3 scripts/download_dataset.py --workspace <ws> --project <project> \
 ## 1b. Download batch da CSV — `download_batch.py`
 
 Automatizza il passo 1 (download) + il passo 2 (dedupe) per più dataset,
-leggendo `data/datasets_to_download.csv` (colonne: `status`, `workspace_id`,
-`project_id`, `version`, `escooter_class_name` con nomi separati da `|`,
-`notes`).
+leggendo `datasets_to_download.csv` (colonne: `enabled`, `download`,
+`workspace_id`, `project_id`, `version`, `escooter_class_name` con nomi
+separati da `|`, `notes`).
 
 - `version` vuoto: usa il comportamento di default di `download_dataset.py`
-  (versione più recente senza augmentation) e, se il download va a buon
-  fine, la versione effettivamente scaricata viene scritta nella colonna
-  al termine, così diventa esplicita e riproducibile ai run successivi
+  (versione più recente senza augmentation); la versione effettivamente
+  scaricata viene stampata (banner in `download_dataset.py`) ma non scritta
+  nel CSV — fissarla nella colonna `version` resta a discrezione manuale
 - `version` valorizzato: scarica esattamente quella versione
 
 ```
 python3 scripts/download_batch.py
 ```
 
-Elabora solo le righe con `status=todo`. Una riga passa a `status=downloaded`
-solo se download + validazione classi + dedupe vanno tutti a buon fine;
-altrimenti resta `todo` e viene segnalato l'errore, così può essere corretta
-e rilanciata.
+Elabora solo le righe con `enabled=1` e `download=1`. Questo script non
+modifica mai il CSV: si limita a segnalare a schermo, per ogni riga, se
+download + validazione classi + dedupe sono andati a buon fine o se c'è
+stato un errore (in tal caso va corretto a mano quanto necessario e la riga
+va rilanciata).
+
+## 1c. Verifica sincronizzazione CSV/indice — `check_dataset_sync.py`
+
+Dato che `data/` non è versionata, lavorando su più macchine ogni istanza
+del progetto può avere scaricato solo un sottoinsieme dei dataset previsti
+dal CSV locale. Questo script confronta `datasets_to_download.csv` con
+`data/datasets.json` (e con `data/raw/`) e segnala:
+
+- dataset `enabled=1` con `version` fissata ma assenti dall'indice (da
+  scaricare su questa macchina)
+- dataset presenti nell'indice ma la cui cartella in `data/raw/` non c'è più
+- dataset `enabled=1` senza `version` fissata, presenti o assenti
+- dataset presenti nell'indice ma non più corrispondenti a nessuna riga
+  `enabled=1` del CSV (es. dopo un allineamento manuale delle versioni)
+
+```
+python3 scripts/check_dataset_sync.py
+```
+
+Uscita `0` se non ci sono dataset mancanti o disallineati, `1` altrimenti.
 
 ## 2. Deduplica augmentation + conversione poligoni — `dedupe_augmented.py`
 
@@ -189,15 +213,40 @@ incrementali; il quarto è parte dello stadio `variety`):
    secondo momento — non viene buttata, perché ha superato tutti gli altri
    criteri di qualità.
 
-Scrive `data/selected_images.txt` (candidate) e
-`data/flagged_rider_contamination.txt` (da rivedere), entrambi un path per
-riga relativo a `data/interim/` nel formato
-`<dataset_id>/<split>/images/<file>`, più un log degli scarti con il motivo
-in `data/logs/select_images.log`.
+Scrive `data/selected_images.txt` (candidate), `data/flagged_rider_contamination.txt`
+(da rivedere) e `data/flagged_area_threshold.txt` (scartate per soglia di
+area, solo diagnostico), tutti un path per riga relativo a `data/interim/`
+nel formato `<dataset_id>/<split>/images/<file>`, più un log degli scarti
+con il motivo in `data/logs/select_images.log`. Scrive anche
+`data/image_index.json`: un indice con, per ogni immagine esaminata,
+percorso completo, dimensioni ed eventuale decisione di esclusione (stadio
+e motivo) — vedi sezione 3b per come campionarlo.
 
 Sull'ultimo run completo: 9638 immagini di partenza → 5999 dopo i filtri
 economici → 5643 dopo la dedup cross-dataset → 2772 candidate finali (1955
 scartate per conducente incluso, finite in coda di revisione).
+
+## 3b. Campione dall'indice immagini — `build_index_sample.py`
+
+Costruisce un campione di immagini a partire da `data/image_index.json`,
+filtrando su condizioni a piacere sugli attributi di ciascuna voce
+(`dataset_id`, `split`, `image_path`, `width`, `height`, `excluded`,
+`exclusion_stage`, `exclusion_reason`), e le salva in una cartella con le
+bounding box escooter disegnate sopra. Utile per ispezionare a occhio un
+sottoinsieme scelto in base alle decisioni di `select_images.py` (es. solo
+le scartate per soglia di area, solo quelle di un dataset specifico) senza
+rilanciare la pipeline.
+
+```
+python3 scripts/build_index_sample.py --filter "<espressione Python>" --out-dir <cartella> [-n 150]
+```
+
+Il filtro è un'espressione Python valutata su ogni voce dell'indice, coi
+suoi campi disponibili come variabili, es.:
+`--filter "exclusion_stage == 'cheap' and 'lontana' in (exclusion_reason or '')"`.
+Con `-n 0` copia tutte le immagini che soddisfano il filtro invece di
+campionarne un sottoinsieme casuale. Ad ogni esecuzione la cartella di
+output viene svuotata e ripopolata.
 
 ## 4. Costruzione di un dataset da un elenco di candidate — `build_union_dataset.py`
 

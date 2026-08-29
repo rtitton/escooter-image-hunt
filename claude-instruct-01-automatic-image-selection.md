@@ -11,6 +11,7 @@ Dataset modificati si trovano in data/interim e sono censiti in data/dataset.jso
 ## selezione
 - ignorare immagini senza istanze delle classi scooter
 - ignorare immagini di primo piano su scooter (dimensione della bounding box copre quasi tutta l'immagine, p.es. soglia 80%)
+- ignorare immagini con scooter troppo lontano (bounding box troppo piccola rispetto all'immagine, p.es. soglia 0.1%)
 - ignorare immagini troppo piccole (p.es. soglia 160000 pixel)
 - ignorare immagini poco varie: si potrebbe usare un modello YOLO pretrained su COCO per escludere immagini che (oltre allo scooter) non hanno istenze di classi COCO (p.es. soglia almeno 1 istanza COCO).
 

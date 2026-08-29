@@ -3,8 +3,8 @@
 
 Criteri (vedi claude-instruct-01-automatic-image-selection.md):
 1. filtri economici per immagine: presenza di almeno un'istanza escooter,
-   nessuna istanza escooter troppo grande (primo piano), immagine non troppo
-   piccola;
+   nessuna istanza escooter troppo grande (primo piano) né troppo piccola
+   (lontana), immagine non troppo piccola;
 2. deduplicazione cross-dataset per contenuto (perceptual hash), a
    differenza di dedupe_augmented.py che opera solo entro un dataset. I
    perceptual hash sono cache su disco per (dataset, split, nome immagine),
@@ -45,9 +45,15 @@ data/interim/) delle immagini candidate, e un log con il motivo di scarto di
 ogni immagine esclusa. Le immagini scartate per conducente incluso finiscono
 in un elenco separato (data/flagged_rider_contamination.txt), da rivedere/
 correggere manualmente in un secondo momento invece di buttarle: hanno
-comunque superato tutti gli altri criteri di qualità. La copia effettiva
-delle immagini (candidate o flaggate) in una cartella è uno step separato
-(build_union_dataset.py).
+comunque superato tutti gli altri criteri di qualità. Le immagini scartate
+per soglia di area di una bbox escooter (troppo grande/primo piano o troppo
+piccola/lontana) finiscono in un altro elenco separato
+(data/flagged_area_threshold.txt), solo a scopo diagnostico. Per ogni
+immagine esaminata (candidata o scartata) viene inoltre scritto un indice
+(data/image_index.json) con i metadati principali (percorso completo,
+dimensioni) e l'eventuale decisione di esclusione (stadio e motivo). La
+copia effettiva delle immagini (candidate o flaggate) in una cartella è uno
+step separato (build_union_dataset.py).
 """
 import argparse
 import json
@@ -65,6 +71,7 @@ DATA_ROOT = config.DATA_ROOT
 SPLITS = ("train", "valid", "test")
 
 CLOSEUP_AREA_THRESHOLD = config.CLOSEUP_AREA_THRESHOLD  # area relativa (w*h) oltre la quale un'istanza escooter è "primo piano"
+FARAWAY_AREA_THRESHOLD = config.FARAWAY_AREA_THRESHOLD  # area relativa (w*h) sotto la quale un'istanza escooter è troppo piccola/lontana
 MIN_PIXELS = config.MIN_PIXELS  # dimensione minima immagine (larghezza*altezza)
 PHASH_DISTANCE_THRESHOLD = config.PHASH_DISTANCE_THRESHOLD  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
 COCO_MODEL = config.COCO_MODEL
@@ -140,22 +147,53 @@ def rel_label(item: dict) -> str:
     return f"{item['dataset_id']}/{item['split']}/images/{item['image_path'].name}"
 
 
-def apply_cheap_filters(items: list, log: list) -> list:
+def index_record(item: dict, w_px: int, h_px: int) -> dict:
+    """Voce base dell'indice immagini: metadati principali (percorso completo,
+    dimensioni) e nessuna decisione di esclusione ancora presa."""
+    return {
+        "dataset_id": item["dataset_id"],
+        "split": item["split"],
+        "image_path": str(item["image_path"]),
+        "width": w_px,
+        "height": h_px,
+        "excluded": False,
+        "exclusion_stage": None,
+        "exclusion_reason": None,
+    }
+
+
+def mark_excluded(index: dict, item: dict, stage: str, reason: str) -> None:
+    index[rel_label(item)].update(excluded=True, exclusion_stage=stage, exclusion_reason=reason)
+
+
+def apply_cheap_filters(items: list, log: list, index: dict) -> tuple[list, list]:
     survivors = []
+    flagged_area = []
     for item in items:
+        with Image.open(item["image_path"]) as im:
+            w_px, h_px = im.size
+        index[rel_label(item)] = index_record(item, w_px, h_px)
+
         if not item["escooter_boxes"]:
             log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza escooter)")
+            mark_excluded(index, item, "cheap", "nessuna istanza escooter")
             continue
         if any(w * h >= CLOSEUP_AREA_THRESHOLD for _, _, _, w, h in item["escooter_boxes"]):
             log.append(f"SCARTATA {rel_label(item)}  (istanza escooter troppo grande, primo piano)")
+            mark_excluded(index, item, "cheap", "istanza escooter troppo grande, primo piano")
+            flagged_area.append(item)
             continue
-        with Image.open(item["image_path"]) as im:
-            w_px, h_px = im.size
+        if any(w * h < FARAWAY_AREA_THRESHOLD for _, _, _, w, h in item["escooter_boxes"]):
+            log.append(f"SCARTATA {rel_label(item)}  (istanza escooter troppo piccola, lontana)")
+            mark_excluded(index, item, "cheap", "istanza escooter troppo piccola, lontana")
+            flagged_area.append(item)
+            continue
         if w_px * h_px < MIN_PIXELS:
             log.append(f"SCARTATA {rel_label(item)}  (immagine troppo piccola: {w_px}x{h_px})")
+            mark_excluded(index, item, "cheap", f"immagine troppo piccola: {w_px}x{h_px}")
             continue
         survivors.append(item)
-    return survivors
+    return survivors, flagged_area
 
 
 class UnionFind:
@@ -224,7 +262,7 @@ def cluster_near_duplicates(hashes: np.ndarray, threshold: int, chunk_size: int 
 
 
 def dedupe_cross_dataset(
-    items: list, log: list, refresh_cache: bool = False, cache_path: Path = PHASH_CACHE_PATH,
+    items: list, log: list, index: dict, refresh_cache: bool = False, cache_path: Path = PHASH_CACHE_PATH,
 ) -> list:
     if not items:
         return items
@@ -244,7 +282,9 @@ def dedupe_cross_dataset(
         for i in idxs:
             if i == best:
                 continue
-            log.append(f"SCARTATA {rel_label(items[i])}  (quasi-duplicato di {rel_label(items[best])})")
+            reason = f"quasi-duplicato di {rel_label(items[best])}"
+            log.append(f"SCARTATA {rel_label(items[i])}  ({reason})")
+            mark_excluded(index, items[i], "dedup", reason)
         survivors.append(items[best])
     return survivors
 
@@ -326,7 +366,7 @@ def detections_from_result(result) -> list:
 
 
 def apply_variety_filter(
-    items: list, log: list, limit: int | None = None, refresh_cache: bool = False,
+    items: list, log: list, index: dict, limit: int | None = None, refresh_cache: bool = False,
     cache_path: Path = VARIETY_CACHE_PATH,
 ) -> tuple[list, list]:
     """Scarta le immagini in cui il modello YOLO pretrained COCO rileva meno
@@ -405,8 +445,9 @@ def apply_variety_filter(
         detections_by_deg = {int(deg): dets for deg, dets in entry["detections"].items()}
 
         if len(detections_by_deg[0]) < VARIETY_MIN_INSTANCES:
-            log.append(f"SCARTATA {rel_label(item)}  "
-                       f"({len(detections_by_deg[0])} istanze COCO rilevate, minimo richiesto {VARIETY_MIN_INSTANCES})")
+            reason = f"{len(detections_by_deg[0])} istanze COCO rilevate, minimo richiesto {VARIETY_MIN_INSTANCES}"
+            log.append(f"SCARTATA {rel_label(item)}  ({reason})")
+            mark_excluded(index, item, "variety", reason)
             continue
 
         contaminated = False
@@ -430,7 +471,9 @@ def apply_variety_filter(
                 break
 
         if contaminated:
-            log.append(f"FLAGGATA {rel_label(item)}  (almeno una bbox escooter include probabilmente il conducente)")
+            reason = "almeno una bbox escooter include probabilmente il conducente"
+            log.append(f"FLAGGATA {rel_label(item)}  ({reason})")
+            mark_excluded(index, item, "variety", reason)
             flagged_rider.append(item)
             continue
 
@@ -440,6 +483,8 @@ def apply_variety_filter(
 
 CANDIDATES_PATH = config.CANDIDATES_PATH
 FLAGGED_RIDER_PATH = config.FLAGGED_RIDER_PATH
+FLAGGED_AREA_PATH = config.FLAGGED_AREA_PATH
+IMAGE_INDEX_PATH = config.IMAGE_INDEX_PATH
 LOG_PATH = config.SELECT_IMAGES_LOG_PATH
 
 
@@ -452,6 +497,22 @@ def write_flagged(flagged: list) -> None:
         + "\n".join(rel_label(item) for item in flagged) + "\n"
     )
     print(f"Immagini flaggate (conducente incluso) scritte in {FLAGGED_RIDER_PATH} ({len(flagged)} immagini)")
+
+
+def write_flagged_area(flagged: list) -> None:
+    FLAGGED_AREA_PATH.write_text(
+        "# Immagini scartate per soglia di area di una bbox escooter (troppo grande/primo piano "
+        "oltre CLOSEUP_AREA_THRESHOLD, o troppo piccola/lontana sotto FARAWAY_AREA_THRESHOLD) — "
+        "un path per riga, relativo a data/interim/.\n"
+        + "\n".join(rel_label(item) for item in flagged) + "\n"
+    )
+    print(f"Immagini flaggate (soglia area) scritte in {FLAGGED_AREA_PATH} ({len(flagged)} immagini)")
+
+
+def write_image_index(index: dict) -> None:
+    records = sorted(index.values(), key=lambda r: r["image_path"])
+    IMAGE_INDEX_PATH.write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
+    print(f"Indice immagini scritto in {IMAGE_INDEX_PATH} ({len(records)} immagini)")
 
 
 def write_outputs(survivors: list, log: list, stage: str) -> None:
@@ -487,31 +548,36 @@ def main():
     print(f"{len(items)} immagini totali nel pool di partenza.")
 
     log: list = []
-    survivors = apply_cheap_filters(items, log)
+    index: dict = {}
+    survivors, flagged_area = apply_cheap_filters(items, log, index)
     print(f"Dopo i filtri economici: {len(survivors)}/{len(items)} immagini sopravvissute "
-          f"({len(items) - len(survivors)} scartate).")
+          f"({len(items) - len(survivors)} scartate, di cui {len(flagged_area)} per soglie di area).")
+    write_flagged_area(flagged_area)
 
     if args.stage == "cheap":
         write_outputs(survivors, log, args.stage)
+        write_image_index(index)
         return
 
     before = len(survivors)
-    survivors = dedupe_cross_dataset(survivors, log, refresh_cache=args.refresh_phash_cache)
+    survivors = dedupe_cross_dataset(survivors, log, index, refresh_cache=args.refresh_phash_cache)
     print(f"Dopo la dedup cross-dataset: {len(survivors)}/{before} immagini sopravvissute "
           f"({before - len(survivors)} quasi-duplicati scartati).")
 
     if args.stage == "dedup":
         write_outputs(survivors, log, args.stage)
+        write_image_index(index)
         return
 
     before = len(survivors)
     survivors, flagged_rider = apply_variety_filter(
-        survivors, log, limit=args.limit, refresh_cache=args.refresh_variety_cache
+        survivors, log, index, limit=args.limit, refresh_cache=args.refresh_variety_cache
     )
     print(f"Dopo il filtro varietà COCO: {len(survivors)}/{before} immagini sopravvissute "
           f"({before - len(survivors)} scartate, di cui {len(flagged_rider)} per conducente incluso in una bbox).")
     write_outputs(survivors, log, args.stage)
     write_flagged(flagged_rider)
+    write_image_index(index)
 
 
 if __name__ == "__main__":

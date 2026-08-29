@@ -50,6 +50,15 @@ def download_dataset(
     rf_version.download(DOWNLOAD_FORMAT, location=str(out_dir))
     print(f"Dataset scaricato in {out_dir}")
 
+    chosen = next((v for v in versions if int(v.version) == version_number), None)
+    aug = (chosen.augmentation or {}) if chosen else {}
+    scelta = "richiesta esplicitamente" if version is not None else "auto-selezionata"
+    banner = "!" * 70
+    print(f"\n{banner}\n"
+          f"!!! VERSIONE SCARICATA per {workspace}/{project}: v{version_number} ({scelta})\n"
+          f"!!! Augmentation: {'nessuna' if not aug else list(aug.keys())}\n"
+          f"{banner}\n")
+
     annotation_format = check_annotation_format(out_dir)
     missing = validate_class_names(out_dir, escooter_class_names) if escooter_class_names else []
     update_index(out_dir, workspace, project, version_number, annotation_format, escooter_class_names or [], missing)
@@ -142,8 +151,7 @@ def main():
     args = parser.parse_args()
 
     names = args.escooter_class_names.split("|") if args.escooter_class_names else None
-    _, version_number, _ = download_dataset(args.workspace, args.project, args.version, names)
-    print(f"Versione scaricata: {version_number}")
+    download_dataset(args.workspace, args.project, args.version, names)
 
 
 if __name__ == "__main__":

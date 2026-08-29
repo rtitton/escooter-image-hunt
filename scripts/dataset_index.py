@@ -41,7 +41,7 @@ def upsert(index: list[dict], entry: dict) -> list[dict]:
 def enabled_ids() -> set[str]:
     """Ritorna gli id (`<project_id>-v<version>`, coerenti con quelli
     assegnati da download_dataset.py) delle righe con enabled=1 in
-    data/datasets_to_download.csv. Usato per escludere dai passi di
+    datasets_to_download.csv. Usato per escludere dai passi di
     elaborazione i dataset disabilitati senza doverli rimuovere dall'indice."""
     with CSV_PATH.open(newline="", encoding="utf-8") as f:
         print(f"Indice CSV dei dataset utilizzato: {CSV_PATH}")
