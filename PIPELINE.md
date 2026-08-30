@@ -7,10 +7,10 @@ selezione vedi
 [claude-instruct-01-automatic-image-selection.md](claude-instruct-01-automatic-image-selection.md).
 
 ## Panoramica
-Il file `datasets_to_download.csv`, nella root del progetto, contiene l'elenco dei dataset Roboflow da trattare, con il relativo stato (downloaded, todo, ignore, ecc.), e determina il contenuto della directory `data`.  
+Il file `datasets_to_download.csv`, nella root del progetto, contiene l'elenco dei dataset Roboflow da trattare, con il relativo stato (downloaded, todo, ignore, ecc.) e i parametri di selezione per-dataset, e determina il contenuto della directory `data`. Il tracciato è documentato in [datasets_to_download.md](datasets_to_download.md).  
 La directory `data` contiene i dataset scaricati e tutto il materiale relativo alle elaborazioni successive della pipeline.  
 
-Il file `datasets_to_download.csv` e l'intera directory `data` sono specifici di ogni istanza del progetto e inclusi in `.gitignore`; per riprodurli in una nuova istanza del progetto, è necessario creare il file `datasets_to_download.csv` a partire dall'elenco generale dei dataset Roboflow selezionati `roboflow-datasets_to_download.csv`.
+`datasets_to_download.csv` è versionato in git ma resta specifico dell'istanza; la directory `data` è invece in `.gitignore`. Per una nuova istanza si crea `datasets_to_download.csv` a partire dall'elenco generale dei dataset Roboflow selezionati `roboflow-datasets_to_download.csv`.
 
 
 ```
@@ -110,9 +110,9 @@ python3 scripts/download_dataset.py --workspace <ws> --project <project> \
 ## 1b. Download batch da CSV — `download_batch.py`
 
 Automatizza il passo 1 (download) + il passo 2 (dedupe) per più dataset,
-leggendo `datasets_to_download.csv` (colonne: `enabled`, `download`,
-`workspace_id`, `project_id`, `version`, `escooter_class_name` con nomi
-separati da `|`, `notes`).
+leggendo `datasets_to_download.csv` (tracciato completo in
+[datasets_to_download.md](datasets_to_download.md)). Usa le colonne `enabled`,
+`download`, `workspace_id`, `project_id`, `version`, `escooter_class_name`.
 
 - `version` vuoto: usa il comportamento di default di `download_dataset.py`
   (versione più recente senza augmentation); la versione effettivamente
@@ -181,22 +181,35 @@ Applica i criteri di qualità (vedi
 su tutti i dataset deduplicati registrati nell'indice.
 
 ```
-python3 scripts/select_images.py [--stage cheap|dedup|variety|all] [--limit N]
+python3 scripts/select_images.py [--stage cheap|temporal|dedup|variety|all] [--temporal-dedup] [--limit N]
 ```
 
-Quattro stadi in sequenza (i primi tre eseguibili isolatamente per test
-incrementali; il quarto è parte dello stadio `variety`):
+Quattro stadi in sequenza più uno opzionale (i primi eseguibili isolatamente
+per test incrementali; il filtro conducente è parte dello stadio `variety`):
 
 1. **filtri economici** — scarta immagini senza istanze escooter, con
    un'istanza escooter "primo piano" (area ≥ 40% dell'immagine), o troppo
    piccole (< 160.000 px totali)
+1-bis. **dedup temporale** *(opzionale, solo con `--temporal-dedup` o
+   `--stage temporal`)* — parecchi dataset sorgente sono campionamenti fitti
+   di poche riprese video (nomi tipo `frame_00000`, `frame_00010`). Dentro
+   ogni gruppo `(dataset, split, clip)` — `clip` e indice di frame ricavati
+   dal nome file — ordinato per indice, scarta un frame solo se è visivamente
+   vicino all'ultimo frame tenuto (Hamming del pHash < `TEMPORAL_KEEP_DISTANCE`,
+   default 10) e a non più di `TEMPORAL_MAX_GAP` indici da esso (default 60),
+   tenendo comunque il primo e l'ultimo del gruppo. Gruppi sotto
+   `TEMPORAL_MIN_SEQ` frame (default 5) e nomi non numerati restano intatti.
+   Riusa la cache dei perceptual hash dello stadio dedup. Nota: siccome la
+   dedup cross-dataset è un clustering a catena, questo stadio può far
+   *aumentare* di poche unità le candidate finali (rimuovendo un frame-ponte
+   si spezza il suo cluster pHash) — effetto atteso e difendibile
 2. **dedup cross-dataset** — calcola il perceptual hash di ogni immagine
    sopravvissuta e raggruppa (union-find, a blocchi per contenere la
-   memoria) quelle a distanza di Hamming ≤ 8; per ogni gruppo tiene
-   l'immagine con più bounding box totali
+   memoria) quelle a distanza di Hamming ≤ `PHASH_DISTANCE_THRESHOLD`; per
+   ogni gruppo tiene l'immagine con più bounding box totali
 3. **filtro varietà** — scarta le immagini in cui un modello Ultralytics
    pretrained su COCO (`yolo11l.pt`, batch da 16, GPU se disponibile) rileva
-   meno di `VARIETY_MIN_INSTANCES` istanze di classi COCO (default 1)
+   meno di `VARIETY_MIN_INSTANCES` istanze di classi COCO
    nell'orientazione originale
 4. **filtro conducente incluso** — alcuni dataset sorgente annotano l'intera
    persona invece del solo monopattino (es. `electric-scooter-dpwkl-v1`, ma
@@ -212,6 +225,20 @@ incrementali; il quarto è parte dello stadio `variety`):
    `data/flagged_rider_contamination.txt`, da correggere manualmente in un
    secondo momento — non viene buttata, perché ha superato tutti gli altri
    criteri di qualità.
+
+**Override per-dataset.** Le soglie `CLOSEUP_AREA_THRESHOLD` e `FARAWAY_AREA_THRESHOLD` (stadio 1),
+`PHASH_DISTANCE_THRESHOLD` (stadio 2) e `VARIETY_MIN_INSTANCES` (stadio 3)
+valgono di default quelle di `scripts/.env`, ma si possono sovrascrivere per
+singolo dataset nelle colonne omonime di `datasets_to_download.csv`
+(`variety_min_instances`, `closeup_area_threshold`, `faraway_area_threshold`,
+`phash_distance_threshold`);
+cella vuota o `default` = valore di `.env`. Serve a trattare a parte sorgenti
+particolari — p.es. footage con escooter piccoli (varietà più permissiva,
+closeup più alto, faraway più basso) o molto ripetitiva (pHash più stretto
+per non collassarla).
+Nella dedup cross-dataset la soglia di una coppia di immagini di dataset
+diversi è la **più stretta** delle due. Gli override attivi compaiono nel
+report di `report_image_index.py`.
 
 Scrive `data/selected_images.txt` (candidate), `data/flagged_rider_contamination.txt`
 (da rivedere) e `data/flagged_area_threshold.txt` (scartate per soglia di
@@ -309,15 +336,3 @@ decisione è salvata subito in `data/review_decisions.json`: la sessione si
 può interrompere e riprendere quando si vuole, ripartendo dalla prima
 immagine ancora senza decisione.
 
-## Stato e prossimi passi
-
-- fatto: download (singolo e batch), deduplica + conversione poligoni,
-  selezione a 4 stadi (incluso il filtro conducente multi-orientazione),
-  costruzione di dataset da un elenco di candidate, campione di QA visiva,
-  applicazione di selezione manuale finale
-- in corso: revisione manuale delle candidate con `review_app.py`, ed
-  eventuale correzione delle bbox in `data/processed/rider_review/`
-- da fare: annotazione delle classi COCO sul dataset di unione con un
-  modello Ultralytics pretrained di grandi dimensioni (vedi README.md,
-  "Aspetti pratici"); split train/valid/test del dataset di unione (non
-  ancora definito — i candidati non ereditano lo split del dataset sorgente)

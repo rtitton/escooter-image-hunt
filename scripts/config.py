@@ -50,6 +50,12 @@ CLOSEUP_AREA_THRESHOLD = _env_float("CLOSEUP_AREA_THRESHOLD", 0.4)
 FARAWAY_AREA_THRESHOLD = _env_float("FARAWAY_AREA_THRESHOLD", 0.001)
 MIN_PIXELS = _env_int("MIN_PIXELS", 160_000)
 PHASH_DISTANCE_THRESHOLD = _env_int("PHASH_DISTANCE_THRESHOLD", 8)
+
+# --- Dedup temporale (select_images.py, opzionale con --temporal-dedup) ---
+# Assottiglia le sequenze di frame consecutivi estratti dallo stesso video.
+TEMPORAL_MIN_SEQ = _env_int("TEMPORAL_MIN_SEQ", 5)  # frame minimi in un gruppo (dataset, split, clip) perché venga assottigliato
+TEMPORAL_KEEP_DISTANCE = _env_int("TEMPORAL_KEEP_DISTANCE", 10)  # distanza di Hamming del pHash dall'ultimo frame tenuto sotto la quale un frame è ridondante
+TEMPORAL_MAX_GAP = _env_int("TEMPORAL_MAX_GAP", 60)  # massima distanza di indice entro cui un frame di riferimento "copre" i successivi
 RIDER_OVERLAP_THRESHOLD = _env_float("RIDER_OVERLAP_THRESHOLD", 0.3)  # frazione dell'area della bbox escooter coperta da una detection "persona" perché la coppia sia considerata (precondizione spaziale prima del confronto altezze)
 RIDER_HEIGHT_RATIO_THRESHOLD = _env_float("RIDER_HEIGHT_RATIO_THRESHOLD", 1.0)  # rapporto (altezza escooter / altezza persona) oltre il quale si considera il conducente incluso nell'annotazione
 

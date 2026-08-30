@@ -18,6 +18,9 @@ Dataset modificati si trovano in data/interim e sono censiti in data/dataset.jso
 ## deduplicazione
 I dataser Roboflow spesso sono frutto di fork e fusioni di dataset esistenti: è opportuno identificare e scartare doppioni esatti e anche immagini molto simili fra loro (p.es. soglia su distanza basata su perceptual hash).
 
+## deduplicazione temporale (opzionale)
+Diversi dataset sorgente sono campionamenti fitti di poche riprese video (nomi file tipo `frame_00000`, `frame_00010`, …). Una dedup a soglia singola su questi frame o li tiene tutti o collassa un'intera ripresa a una sola immagine. Opzionalmente (`select_images.py --temporal-dedup`) si raggruppano le immagini per `(dataset, split, clip)` — `clip` e indice di frame ricavati dal nome — e in ogni gruppo, percorso in ordine di indice, si scarta un frame solo se è visivamente vicino all'ultimo frame tenuto (Hamming del pHash sotto soglia) ed entro un intervallo di indici massimo; primo e ultimo frame del gruppo si tengono sempre. Serve a mantenere solo i keyframe di ciascuna ripresa.
+
 
 
 

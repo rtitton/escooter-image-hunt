@@ -5,6 +5,10 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
 1. filtri economici per immagine: presenza di almeno un'istanza escooter,
    nessuna istanza escooter troppo grande (primo piano) né troppo piccola
    (lontana), immagine non troppo piccola;
+1-bis. (opzionale, --temporal-dedup) dedup temporale: assottiglia le
+   sequenze di frame consecutivi estratti dallo stesso video (nomi tipo
+   frame_00000, frame_00010), tenendo solo i keyframe. Eseguita fra i filtri
+   economici e la dedup cross-dataset; v. dedupe_temporal();
 2. deduplicazione cross-dataset per contenuto (perceptual hash), a
    differenza di dedupe_augmented.py che opera solo entro un dataset. I
    perceptual hash sono cache su disco per (dataset, split, nome immagine),
@@ -40,6 +44,16 @@ Criteri (vedi claude-instruct-01-automatic-image-selection.md):
    visibile ma non annotato, un falso negativo che confonderebbe il
    training almeno quanto il problema che si vuole risolvere.
 
+Le soglie CLOSEUP_AREA_THRESHOLD e FARAWAY_AREA_THRESHOLD (filtro 1),
+VARIETY_MIN_INSTANCES (filtro 3) e PHASH_DISTANCE_THRESHOLD (filtro 2) sono di
+default quelle di config/.env, ma possono essere sovrascritte per singolo
+dataset dalle colonne omonime di datasets_to_download.csv (cella vuota o
+"default" = valore di .env). Utile per trattare a parte sorgenti particolari,
+p.es. footage con escooter piccoli (closeup più alto, faraway più basso,
+varietà più permissiva) o molto ripetitiva (pHash più stretto). Per la dedup
+cross-dataset la soglia di una coppia di immagini di dataset diversi è la più
+stretta delle due (v. dataset_param() e cluster_near_duplicates()).
+
 Non copia immagini: scrive un file di testo con un path per riga (relativo a
 data/interim/) delle immagini candidate, e un log con il motivo di scarto di
 ogni immagine esclusa. Le immagini scartate per conducente incluso finiscono
@@ -57,6 +71,7 @@ step separato (build_union_dataset.py).
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 import imagehash
@@ -74,6 +89,9 @@ CLOSEUP_AREA_THRESHOLD = config.CLOSEUP_AREA_THRESHOLD  # area relativa (w*h) ol
 FARAWAY_AREA_THRESHOLD = config.FARAWAY_AREA_THRESHOLD  # area relativa (w*h) sotto la quale un'istanza escooter è troppo piccola/lontana
 MIN_PIXELS = config.MIN_PIXELS  # dimensione minima immagine (larghezza*altezza)
 PHASH_DISTANCE_THRESHOLD = config.PHASH_DISTANCE_THRESHOLD  # distanza di Hamming del perceptual hash sotto la quale due immagini sono quasi-duplicati
+TEMPORAL_MIN_SEQ = config.TEMPORAL_MIN_SEQ
+TEMPORAL_KEEP_DISTANCE = config.TEMPORAL_KEEP_DISTANCE
+TEMPORAL_MAX_GAP = config.TEMPORAL_MAX_GAP
 COCO_MODEL = config.COCO_MODEL
 COCO_BATCH_SIZE = config.COCO_BATCH_SIZE
 # ROTATIONS = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180, 270: Image.ROTATE_270}
@@ -86,6 +104,17 @@ PHASH_CACHE_PATH = config.PHASH_CACHE_PATH
 VARIETY_CACHE_PATH = config.VARIETY_CACHE_PATH
 VARIETY_CACHE_SAVE_EVERY = config.VARIETY_CACHE_SAVE_EVERY  # batch tra un salvataggio incrementale della cache e il successivo
 VARIETY_MIN_INSTANCES = config.VARIETY_MIN_INSTANCES  # istanze COCO minime nell'orientazione originale perché un'immagine sia di buona varietà
+
+# Override per-dataset di CLOSEUP_AREA_THRESHOLD / PHASH_DISTANCE_THRESHOLD /
+# VARIETY_MIN_INSTANCES, dalle colonne omonime di datasets_to_download.csv.
+# Cella vuota o "default" -> vale il valore di config/.env qui sopra.
+SELECTION_OVERRIDES = dataset_index.selection_overrides()
+
+
+def dataset_param(dataset_id: str, column: str, default):
+    """Valore effettivo di un parametro di selezione per un dataset: override
+    dal CSV se presente, altrimenti il default di config/.env."""
+    return SELECTION_OVERRIDES.get(dataset_id, {}).get(column, default)
 
 
 def load_datasets() -> list[dict]:
@@ -178,12 +207,14 @@ def apply_cheap_filters(items: list, log: list, index: dict) -> tuple[list, list
             log.append(f"SCARTATA {rel_label(item)}  (nessuna istanza escooter)")
             mark_excluded(index, item, "cheap", "nessuna istanza escooter")
             continue
-        if any(w * h >= CLOSEUP_AREA_THRESHOLD for _, _, _, w, h in item["escooter_boxes"]):
+        closeup_thr = dataset_param(item["dataset_id"], "closeup_area_threshold", CLOSEUP_AREA_THRESHOLD)
+        if any(w * h >= closeup_thr for _, _, _, w, h in item["escooter_boxes"]):
             log.append(f"SCARTATA {rel_label(item)}  (istanza escooter troppo grande, primo piano)")
             mark_excluded(index, item, "cheap", "istanza escooter troppo grande, primo piano")
             flagged_area.append(item)
             continue
-        if any(w * h < FARAWAY_AREA_THRESHOLD for _, _, _, w, h in item["escooter_boxes"]):
+        faraway_thr = dataset_param(item["dataset_id"], "faraway_area_threshold", FARAWAY_AREA_THRESHOLD)
+        if any(w * h < faraway_thr for _, _, _, w, h in item["escooter_boxes"]):
             log.append(f"SCARTATA {rel_label(item)}  (istanza escooter troppo piccola, lontana)")
             mark_excluded(index, item, "cheap", "istanza escooter troppo piccola, lontana")
             flagged_area.append(item)
@@ -243,9 +274,14 @@ def phash_ints(items: list, cache_path: Path = PHASH_CACHE_PATH, refresh_cache: 
     return values
 
 
-def cluster_near_duplicates(hashes: np.ndarray, threshold: int, chunk_size: int = 1000) -> UnionFind:
-    """Raggruppa gli indici con distanza di Hamming <= threshold, a blocchi
-    per contenere la memoria (matrice N x N di distanze evitata in un colpo solo)."""
+def cluster_near_duplicates(hashes: np.ndarray, thresholds: np.ndarray, chunk_size: int = 1000) -> UnionFind:
+    """Raggruppa gli indici con distanza di Hamming abbastanza piccola, a
+    blocchi per contenere la memoria (matrice N x N di distanze evitata in un
+    colpo solo). `thresholds` è la soglia per-immagine (può variare per
+    dataset, v. colonna phash_distance_threshold del CSV): due immagini sono
+    quasi-duplicati solo se la loro distanza rientra nella soglia *più stretta*
+    delle due (min), così un dataset con soglia bassa non viene assorbito in
+    cluster ancorati a dataset più permissivi."""
     n = len(hashes)
     uf = UnionFind(n)
     for start in range(0, n, chunk_size):
@@ -253,7 +289,8 @@ def cluster_near_duplicates(hashes: np.ndarray, threshold: int, chunk_size: int 
         block = hashes[start:end]
         xor = block[:, None] ^ hashes[None, :]
         dist = np.bitwise_count(xor)
-        close_i, close_j = np.where(dist <= threshold)
+        pair_threshold = np.minimum(thresholds[start:end, None], thresholds[None, :])
+        close_i, close_j = np.where(dist <= pair_threshold)
         for bi, j in zip(close_i, close_j):
             i = start + bi
             if i < j:
@@ -267,7 +304,11 @@ def dedupe_cross_dataset(
     if not items:
         return items
     hashes = phash_ints(items, cache_path=cache_path, refresh_cache=refresh_cache)
-    uf = cluster_near_duplicates(hashes, PHASH_DISTANCE_THRESHOLD)
+    thresholds = np.array(
+        [dataset_param(it["dataset_id"], "phash_distance_threshold", PHASH_DISTANCE_THRESHOLD) for it in items],
+        dtype=np.int16,
+    )
+    uf = cluster_near_duplicates(hashes, thresholds)
 
     groups: dict = {}
     for i in range(len(items)):
@@ -286,6 +327,107 @@ def dedupe_cross_dataset(
             log.append(f"SCARTATA {rel_label(items[i])}  ({reason})")
             mark_excluded(index, items[i], "dedup", reason)
         survivors.append(items[best])
+    return survivors
+
+
+RF_SUFFIX_RE = re.compile(r"_(?:jpe?g|png)\.rf\.[0-9a-f]{32}$", re.IGNORECASE)
+CLIP_FRAME_RE = re.compile(r"^(?P<clip>.*?)[ _-]?(?P<idx>\d+)$")
+MAX_PLAUSIBLE_FRAME_IDX = 100_000_000  # oltre questo il "numero" nel nome è un timestamp, non un indice di frame
+
+
+def clip_and_frame(image_path: Path) -> tuple[str, int | None]:
+    """Da un nome file Roboflow (es. ``frame_00010_jpg.rf.<md5>.jpg``) ricava
+    l'identità della ripresa di origine e l'indice del frame, quando il nome è
+    una sequenza numerata. Ritorna ``(stem, None)`` se non lo è (nessun numero
+    finale, o un numero così grande da essere un timestamp): in quel caso
+    l'immagine non partecipa alla dedup temporale."""
+    stem = RF_SUFFIX_RE.sub("", image_path.stem)
+    m = CLIP_FRAME_RE.match(stem)
+    if not m:
+        return stem, None
+    idx = int(m.group("idx"))
+    if idx > MAX_PLAUSIBLE_FRAME_IDX:
+        return stem, None
+    return (m.group("clip") or "_", idx)
+
+
+def dedupe_temporal(
+    items: list, log: list, index: dict, refresh_cache: bool = False,
+    cache_path: Path = PHASH_CACHE_PATH,
+) -> list:
+    """Assottiglia le sequenze di frame consecutivi estratti dallo stesso
+    video: parecchi dataset sorgente sono campionamenti fitti di poche riprese
+    (nomi tipo ``frame_00000``, ``frame_00010`` …). La dedup cross-dataset a
+    soglia singola su questi frame o li tiene tutti (la catena di quasi-
+    duplicati non si connette) o collassa un'intera panoramica a una sola
+    immagine (catena transitiva).
+
+    Qui invece le immagini sono raggruppate per ``(dataset, split, clip)`` —
+    ``clip`` e indice di frame ricavati dal nome file — e ogni gruppo con
+    almeno TEMPORAL_MIN_SEQ frame viene percorso in ordine di indice: un
+    frame è scartato quando è visivamente vicino all'ultimo frame tenuto
+    (Hamming del pHash < TEMPORAL_KEEP_DISTANCE) e a non più di
+    TEMPORAL_MAX_GAP indici da esso. Primo e ultimo frame del gruppo si
+    tengono sempre; superato TEMPORAL_MAX_GAP si tiene comunque il frame
+    corrente, che diventa il nuovo riferimento. La somiglianza pHash è la
+    vera salvaguardia contro i gruppi che sono in realtà raccolte di immagini
+    distinte numerate (frame consecutivi non correlati → pHash lontano →
+    tenuti). Sequenze sotto TEMPORAL_MIN_SEQ frame e nomi non numerati
+    restano intatti e passano alla dedup cross-dataset.
+
+    Opzionale: attivo solo con ``--temporal-dedup``. Riusa la cache dei
+    perceptual hash dello stadio dedup.
+
+    Nota: girando prima della dedup cross-dataset, che è un clustering a
+    catena (single-linkage), questo filtro può far *aumentare* di poche
+    unità il numero di candidate finali — rimuovendo un frame che faceva da
+    ponte fra due immagini altrimenti non simili si spezza il suo cluster
+    pHash in due, e ognuno dei due tiene il proprio rappresentante. È un
+    effetto atteso: quei frame-ponte erano soppressi solo per transitività.
+    """
+    if not items:
+        return items
+
+    sequences: dict = {}
+    for i, item in enumerate(items):
+        clip, frame_idx = clip_and_frame(item["image_path"])
+        if frame_idx is None:
+            continue
+        sequences.setdefault((item["dataset_id"], item["split"], clip), []).append((frame_idx, i))
+
+    long_seqs = {k: v for k, v in sequences.items() if len(v) >= TEMPORAL_MIN_SEQ}
+    if not long_seqs:
+        print("Dedup temporale: nessuna sequenza numerata di almeno "
+              f"{TEMPORAL_MIN_SEQ} frame, nessuno scarto.")
+        return items
+
+    hashes = phash_ints(items, cache_path=cache_path, refresh_cache=refresh_cache)
+
+    dropped: set = set()
+    for members in long_seqs.values():
+        members.sort()
+        kept_pos = 0
+        kept_frame_idx = members[0][0]
+        for k in range(1, len(members) - 1):  # primo e ultimo frame sempre tenuti
+            frame_idx, i = members[k]
+            kept_i = members[kept_pos][1]
+            distance = int(np.bitwise_count(hashes[i] ^ hashes[kept_i]))
+            similar = distance < TEMPORAL_KEEP_DISTANCE
+            within_gap = (frame_idx - kept_frame_idx) <= TEMPORAL_MAX_GAP
+            if similar and within_gap:
+                dropped.add(i)
+            else:
+                kept_pos, kept_frame_idx = k, frame_idx
+
+    survivors = []
+    for i, item in enumerate(items):
+        if i not in dropped:
+            survivors.append(item)
+            continue
+        clip, _ = clip_and_frame(item["image_path"])
+        reason = f"frame ridondante nella sequenza temporale '{clip}'"
+        log.append(f"SCARTATA {rel_label(item)}  ({reason})")
+        mark_excluded(index, item, "temporal", reason)
     return survivors
 
 
@@ -444,8 +586,9 @@ def apply_variety_filter(
         h_px, w_px = entry["orig_shape"]
         detections_by_deg = {int(deg): dets for deg, dets in entry["detections"].items()}
 
-        if len(detections_by_deg[0]) < VARIETY_MIN_INSTANCES:
-            reason = f"{len(detections_by_deg[0])} istanze COCO rilevate, minimo richiesto {VARIETY_MIN_INSTANCES}"
+        variety_min = dataset_param(item["dataset_id"], "variety_min_instances", VARIETY_MIN_INSTANCES)
+        if len(detections_by_deg[0]) < variety_min:
+            reason = f"{len(detections_by_deg[0])} istanze COCO rilevate, minimo richiesto {variety_min}"
             log.append(f"SCARTATA {rel_label(item)}  ({reason})")
             mark_excluded(index, item, "variety", reason)
             continue
@@ -531,8 +674,12 @@ def write_outputs(survivors: list, log: list, stage: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=["cheap", "dedup", "variety", "all"], default="all",
-                         help="Fino a quale stadio eseguire (per testare incrementalmente); default: tutti")
+    parser.add_argument("--stage", choices=["cheap", "temporal", "dedup", "variety", "all"], default="all",
+                         help="Fino a quale stadio eseguire (per testare incrementalmente); default: tutti. "
+                              "Lo stadio 'temporal' è opzionale: viene eseguito solo con --temporal-dedup o --stage temporal")
+    parser.add_argument("--temporal-dedup", action="store_true",
+                         help="Abilita la dedup temporale (assottiglia le sequenze di frame consecutivi estratti "
+                              "dallo stesso video) fra i filtri economici e la dedup cross-dataset. Disattivata di default")
     parser.add_argument("--limit", type=int, default=None,
                          help="Limita lo stadio variety alle prime N immagini sopravvissute (per test su campione)")
     parser.add_argument("--refresh-variety-cache", action="store_true",
@@ -555,6 +702,17 @@ def main():
     write_flagged_area(flagged_area)
 
     if args.stage == "cheap":
+        write_outputs(survivors, log, args.stage)
+        write_image_index(index)
+        return
+
+    if args.temporal_dedup or args.stage == "temporal":
+        before = len(survivors)
+        survivors = dedupe_temporal(survivors, log, index, refresh_cache=args.refresh_phash_cache)
+        print(f"Dopo la dedup temporale: {len(survivors)}/{before} immagini sopravvissute "
+              f"({before - len(survivors)} frame ridondanti scartati).")
+
+    if args.stage == "temporal":
         write_outputs(survivors, log, args.stage)
         write_image_index(index)
         return

@@ -53,6 +53,44 @@ def enabled_ids() -> set[str]:
         }
 
 
+# Colonne di datasets_to_download.csv che, se valorizzate, sovrascrivono per
+# quel dataset il parametro di selezione omonimo di config/.env. Cella vuota o
+# "default" -> nessun override.
+SELECTION_OVERRIDE_COLUMNS: dict[str, type] = {
+    "variety_min_instances": int,
+    "closeup_area_threshold": float,
+    "faraway_area_threshold": float,
+    "phash_distance_threshold": int,
+}
+
+
+def selection_overrides() -> dict[str, dict]:
+    """Override per-dataset dei parametri di selezione (v.
+    SELECTION_OVERRIDE_COLUMNS), letti dal CSV. Chiave = id dataset
+    (`<project_id>-v<version>`); valore = dict dei soli parametri
+    effettivamente sovrascritti. Dataset senza override non compaiono."""
+    overrides: dict[str, dict] = {}
+    with CSV_PATH.open(newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if not row.get("version"):
+                continue
+            ds_id = f"{row['project_id']}-v{row['version']}"
+            resolved: dict = {}
+            for col, cast in SELECTION_OVERRIDE_COLUMNS.items():
+                raw = (row.get(col) or "").strip()
+                if not raw or raw.lower() == "default":
+                    continue
+                try:
+                    resolved[col] = cast(raw)
+                except ValueError as e:
+                    raise ValueError(
+                        f"{CSV_PATH}: valore non valido nella colonna '{col}' per {ds_id}: {raw!r}"
+                    ) from e
+            if resolved:
+                overrides[ds_id] = resolved
+    return overrides
+
+
 def count_images(split_dir: Path) -> int:
     img_dir = split_dir / "images"
     return len(list(img_dir.glob("*"))) if img_dir.exists() else 0

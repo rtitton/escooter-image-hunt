@@ -1,17 +1,17 @@
-enabled,download,workspace_id,project_id,version,escooter_class_name,notes
-1,0,kdigital,electric-scooter-cd7hw,1,electric scooter,
-1,0,1-rtt72,scooter-etuqi,1,19,
-1,0,sunjune-kim,kick-scooter-3,3,0|1,
-1,0,capstone-design-project,electric-scooter-dpwkl,1,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,
-1,0,riccardo-sutxi,electric-scooters-02-od-hcoce,1,e-scooter,forked da genai-3dila che non aveva versioni
-1,0,riccardo-sutxi,scooter-ddkei-tlsoa,1,kickboard|purple kickboard|scooter,forker da jihoon-xw2ya che non aveva versioni
-1,0,riccardo-sutxi,e-scooters-detection-base-new,1,e-scooter,
-1,0,riccardo-sutxi,6-18-hwgsn,1,kickboard, forked da -njpg8/6-18 - solo 200 imgs ma buona qualita - no bbox ma masks
-1,0,computer-vision-dibh7,scooter-31wb6,25,scooter,molto interessante-immagini-a-campo-largo
-1,0,sec-l21ei,mnstr-datast-new-tst,1,e-scooter,quasi 10k immagini - versione senza aug presente
-1,0,delivery,trott,2,electric scooter, 9k senza aug - maggior parte vengono scremate da deduplicazione
-1,0,p4p-mju3n,p4p-0xslh,3,0, 12k con aug - molte vengono scremate da deduplicazione
-1,0,jihyung-kim,pm-hpp,1,PM-hpp, 364i - conducenti con elmetto - imgs abbastanza originali
-0,0,kickboard-c0lo3,kickboard-a75qx,,person_with_kickboard|2+person_with_kickboard, 441i - abbastanza originale - purtroppo annota attrezzo+persone
-1,0,kts-data,kickboard-data-drone,1,kickboard, 3k immagini - quantità di immagini da drone con escooter piccoli e molto piccoli - masks - andrebbe trattato a parte come sorgente di oggetti piccoli
-1,0,kts-data,-9gklp,7,kickboard, 1.6k immagini - probabile sorgente di oggetti piccoli per kickboard-data-drone
+enabled,download,workspace_id,project_id,version,escooter_class_name,variety_min_instances,closeup_area_threshold,faraway_area_threshold,phash_distance_threshold,notes
+1,0,kdigital,electric-scooter-cd7hw,1,electric scooter,,,,,
+1,0,1-rtt72,scooter-etuqi,1,19,,,,,
+1,0,sunjune-kim,kick-scooter-3,3,0|1,,,,,
+1,0,capstone-design-project,electric-scooter-dpwkl,1,Patinetes electricos - v4 2023-07-28 9-05pm|electric-scooter,,,,,
+1,0,riccardo-sutxi,electric-scooters-02-od-hcoce,1,e-scooter,,,,,forked da genai-3dila che non aveva versioni
+1,0,riccardo-sutxi,scooter-ddkei-tlsoa,1,kickboard|purple kickboard|scooter,,,,,forker da jihoon-xw2ya che non aveva versioni
+1,0,riccardo-sutxi,e-scooters-detection-base-new,1,e-scooter,,,,,
+1,0,riccardo-sutxi,6-18-hwgsn,1,kickboard,,,,, forked da -njpg8/6-18 - solo 200 imgs ma buona qualita - no bbox ma masks
+1,0,computer-vision-dibh7,scooter-31wb6,25,scooter,,,,,molto interessante-immagini-a-campo-largo
+1,0,sec-l21ei,mnstr-datast-new-tst,1,e-scooter,,,,,quasi 10k immagini - versione senza aug presente
+1,0,delivery,trott,2,electric scooter,,,,, 9k senza aug - maggior parte vengono scremate da deduplicazione
+1,0,p4p-mju3n,p4p-0xslh,3,0,,,,, 12k con aug - molte vengono scremate da deduplicazione
+1,0,jihyung-kim,pm-hpp,1,PM-hpp,,,,, 364i - conducenti con elmetto - imgs abbastanza originali
+0,0,kickboard-c0lo3,kickboard-a75qx,,person_with_kickboard|2+person_with_kickboard,,,,, 441i - abbastanza originale - purtroppo annota attrezzo+persone
+1,0,kts-data,kickboard-data-drone,1,kickboard|--- - v5 2025-07-10 11-27am,,,,, 3k immagini - meta' frame drone (classe kickboard) = stessa footage di -9gklp / meta' foto e video a terra annotati a poligono sotto la classe 0 col nome corrotto '--- - v5 2025-07-10 11-27am' (sono escooter - verificato) - masks - andrebbe trattato a parte come sorgente di oggetti piccoli
+1,0,kts-data,-9gklp,7,kickboard,,,,, 1.6k immagini - probabile sorgente di oggetti piccoli per kickboard-data-drone
