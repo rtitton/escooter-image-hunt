@@ -318,6 +318,26 @@ Ad ogni esecuzione la cartella `data/processed/union_review_sample/` viene
 svuotata e ripopolata con un nuovo campione casuale (nessun seed fisso):
 per rigenerare il campione basta rilanciare lo script.
 
+## 5b. Immagini annotate per dataset — `build_bydataset_annotated.py`
+
+Esporta la selezione finale (di norma il dataset di unione,
+`data/processed/union/`) in `data/processed/bydataset/`, con una cartella
+per ogni dataset sorgente (ricavato dal prefisso `<dataset_id>__` del nome
+file) contenente **tutte** le immagini di quel dataset con le sole bounding
+box escooter disegnate sopra. Utile per rivedere dataset per dataset la
+qualità delle annotazioni sull'intera selezione, non su un campione.
+
+```
+python3 scripts/build_bydataset_annotated.py [-d DIR] [-o DIR] \
+    [--decisions-file FILE] [--include-discard] [--limit N]
+```
+
+Ad ogni esecuzione la cartella di output viene svuotata e ripopolata. Con
+`--decisions-file data/processed/union/review_decisions.json` filtra la
+selezione con le decisioni di `review_app.py` (di default tiene solo
+`select` e `reserve`; con `--include-discard` anche gli scarti); senza,
+esporta tutte le immagini della sorgente.
+
 ## 6. Selezione manuale finale — `review_app.py`
 
 Applicazione locale (solo libreria standard, nessuna dipendenza aggiuntiva)

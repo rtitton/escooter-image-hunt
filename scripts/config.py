@@ -40,6 +40,7 @@ SELECT_IMAGES_LOG_PATH = DATA_ROOT / os.environ.get("SELECT_IMAGES_LOG_FILENAME"
 UNION_DIR = DATA_ROOT / os.environ.get("UNION_DIRNAME", "processed/union")
 UNION_REVIEW_SAMPLE_DIR = DATA_ROOT / os.environ.get("UNION_REVIEW_SAMPLE_DIRNAME", "processed/union_review_sample")
 RIDER_CONTAMINATED_DIR = DATA_ROOT / os.environ.get("RIDER_CONTAMINATED_DIRNAME", "processed/rider_contaminated")
+BYDATASET_DIR = DATA_ROOT / os.environ.get("BYDATASET_DIRNAME", "processed/bydataset")
 
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
