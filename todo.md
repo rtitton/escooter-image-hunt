@@ -11,3 +11,9 @@ ATTENZIONE: il ruolo di questo progetto è ben distinto rispetto a yolo-custom: 
 DEDICARE UNA SESSIONE A METTERE IN ORDINE UN PO DI COSE
 - evidenziare meglio i vari step nella console: ogni volta che dica dove sta leggendo, quanti file entrano, quanti escono
 - chiedere uno script pipeline complessivo
+
+
+ATTENZIONE: valutare fiftyone per la rifinitura del dataset (e anche per analisi avanzatem come ad esempio la deduplicazione). Chiedere a Claude di fare una summa dello stato attuale del progetto e poi se si poteva fare con fiftyone.
+
+
+ATTENZIONE: annotando COCO con yolo pretrained, gemini consiglia confidenza conservativa (0.5), fare un test IOU rispetto alle annotazioni monopattino e di scartare l'annotazione COCO se c'è troppa sovrapposizione. Bisogna però tenere conto del fatto che le persone non possono essere escluse perché il più delle volte conducono il monopattino. Al limite considerare solo box COCO diverse da persona.
