@@ -8,6 +8,8 @@ registra la decisione dell'utente con un tasto:
     s = seleziona
     n = scarta
     freccia sinistra/destra = torna indietro / salta avanti senza decidere
+    end = salta alla prima immagine non revisionata nell'elenco corrente (rispetta i filtri)
+    campo "vai a immagine" (in alto): salta alla N-esima immagine dell'elenco corrente
     backspace = cancella la decisione sull'immagine corrente
 
 Filtri e ordinamento (barra sotto la testata): si può filtrare l'elenco
@@ -88,6 +90,15 @@ def read_boxes_file(lbl_path: Path) -> list:
     return boxes
 
 
+def boxes_modified(lbl_path: Path, backup_path: Path) -> bool:
+    """True se esiste un backup (cioè l'immagine è stata modificata almeno una
+    volta) e le bbox attuali differiscono ancora da quelle originali (es. non
+    è stato fatto un ripristino nel frattempo)."""
+    if not backup_path.exists():
+        return False
+    return read_boxes_file(lbl_path) != read_boxes_file(backup_path)
+
+
 def compute_phashes(dataset_dir: Path, cache_path: Path) -> dict:
     """pHash di ogni immagine del dataset, con cache su disco (invalidata per
     mtime/size, come la cache pHash della pipeline principale in
@@ -123,6 +134,9 @@ PAGE = """<!doctype html>
   #filterbar { display: flex; align-items: center; gap: 16px; padding: 8px 16px; background: #161616; border-bottom: 1px solid #333; flex-wrap: wrap; font-size: 13px; }
   #filterbar label { color: #aaa; display: flex; align-items: center; gap: 4px; }
   #filterbar select { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; }
+  #goto-input { width: 55px; background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; margin-left: 10px; }
+  #goto-btn { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 10px; margin-left: 4px; cursor: pointer; }
+  #goto-btn:hover { background: #444; }
   #phash-status { color: #888; font-size: 12px; }
   #stage { position: relative; display: flex; align-items: center; justify-content: center; height: calc(100vh - 178px); }
   #stage img { max-width: 96vw; max-height: 100%; display: block; }
@@ -135,6 +149,7 @@ PAGE = """<!doctype html>
   #help, #help2 { text-align: center; padding: 6px; font-size: 13px; color: #888; }
   #help kbd, #help2 kbd { background: #333; border-radius: 3px; padding: 1px 6px; margin: 0 2px; }
   #box-status { font-weight: bold; color: #4caf50; }
+  #modified-badge { color: #ffb300; font-weight: bold; margin-left: 8px; }
   #restore-btn { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 2px 10px; margin-left: 8px; cursor: pointer; font-size: 12px; }
   #restore-btn:hover { background: #444; }
   #done { display: none; text-align: center; margin-top: 80px; font-size: 22px; }
@@ -143,7 +158,10 @@ PAGE = """<!doctype html>
 </head>
 <body>
 <div id="bar">
-  <div>Immagine <span id="idx">-</span>/<span id="total">-</span></div>
+  <div>Immagine <span id="idx">-</span>/<span id="total">-</span>
+    <input type="number" id="goto-input" min="1" placeholder="#" title="Vai all'immagine numero...">
+    <button id="goto-btn">vai</button>
+  </div>
   <div class="counts">
     <span class="sel">selezionate: <b id="c-select">0</b></span>
     <span class="disc">scartate: <b id="c-discard">0</b></span>
@@ -186,10 +204,10 @@ PAGE = """<!doctype html>
   <img id="img">
   <canvas id="canvas"></canvas>
 </div>
-<div id="name"><span id="fname"></span> &nbsp;&mdash;&nbsp; <span id="res-info"></span></div>
+<div id="name"><span id="fname"></span> &nbsp;&mdash;&nbsp; <span id="res-info"></span><span id="modified-badge" hidden>&#9998; bbox modificate</span></div>
 <div id="help">
   <kbd>s</kbd> seleziona &nbsp; <kbd>n</kbd> scarta &nbsp;
-  <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> naviga &nbsp; <kbd>backspace</kbd> cancella decisione
+  <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> naviga &nbsp; <kbd>end</kbd> prima non revisionata &nbsp; <kbd>backspace</kbd> cancella decisione
   &nbsp;&nbsp; decisione corrente: <span id="decision">-</span>
 </div>
 <div id="help2">
@@ -216,6 +234,8 @@ const fDataset = document.getElementById("f-dataset");
 const fStatus = document.getElementById("f-status");
 const sort1 = document.getElementById("sort1");
 const sort2 = document.getElementById("sort2");
+const gotoInput = document.getElementById("goto-input");
+const gotoBtn = document.getElementById("goto-btn");
 
 function datasetOf(name) {
   const i = name.indexOf("__");
@@ -412,16 +432,22 @@ function setBoxStatus(text) {
   document.getElementById("box-status").textContent = text;
 }
 
+function setModifiedBadge(modified) {
+  document.getElementById("modified-badge").hidden = !modified;
+}
+
 async function saveBoxes() {
   const name = view[idx];
   const payload = currentBoxes.map(b => [b.cls, b.xc, b.yc, b.w, b.h]);
   setBoxStatus("salvataggio...");
   try {
-    await fetch("/api/boxes/" + encodeURIComponent(name), {
+    const r = await fetch("/api/boxes/" + encodeURIComponent(name), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ boxes: payload }),
     });
+    const data = await r.json();
+    setModifiedBadge(data.modified);
     setBoxStatus("salvato (" + currentBoxes.length + ")");
   } catch (err) {
     setBoxStatus("errore salvataggio");
@@ -438,10 +464,23 @@ async function restoreBoxes() {
   currentBoxes = data.boxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
   selectedIndex = -1;
   drawBoxes(currentBoxes);
+  setModifiedBadge(data.modified);
   setBoxStatus((data.restored ? "ripristinato (" : "già originale (") + currentBoxes.length + ")");
 }
 
 document.getElementById("restore-btn").addEventListener("click", restoreBoxes);
+
+function goToImageNumber() {
+  const n = parseInt(gotoInput.value, 10);
+  if (!Number.isFinite(n) || view.length === 0) return;
+  idx = Math.min(Math.max(n, 1), view.length) - 1;
+  render();
+}
+
+gotoBtn.addEventListener("click", goToImageNumber);
+gotoInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { goToImageNumber(); gotoInput.blur(); }
+});
 
 function toggleBoxesVisibility() {
   boxesVisible = !boxesVisible;
@@ -472,14 +511,15 @@ async function render() {
   updateDecisionLabel();
   updateCounts();
 
-  const boxesPromise = fetch("/api/boxes/" + encodeURIComponent(name)).then(r => r.json()).then(d => d.boxes);
+  const boxesPromise = fetch("/api/boxes/" + encodeURIComponent(name)).then(r => r.json());
   const imageLoaded = new Promise((resolve) => { img.onload = resolve; });
   img.src = "/api/image/" + encodeURIComponent(name);
 
-  const [rawBoxes] = await Promise.all([boxesPromise, imageLoaded]);
+  const [boxesData] = await Promise.all([boxesPromise, imageLoaded]);
   if (token !== renderToken) return; // superata da una navigazione più recente
   document.getElementById("res-info").textContent = img.naturalWidth + " × " + img.naturalHeight + " px";
-  currentBoxes = rawBoxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
+  setModifiedBadge(boxesData.modified);
+  currentBoxes = boxesData.boxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
   selectedIndex = -1;
   drag = null;
   creatingRect = null;
@@ -518,8 +558,17 @@ async function setDecision(decision) {
   }
   if (keep !== -1) {
     // ancora in vista (eventualmente spostata dal riordino): avanza da lì
-    if (keep < view.length - 1) { idx = keep + 1; render(); }
-    else { idx = keep; document.getElementById("done").style.display = "block"; render(); }
+    if (keep < view.length - 1) {
+      idx = keep + 1;
+      render();
+    } else {
+      // era l'ultima della vista: resta lì e mostra il messaggio di fine
+      // (niente render(), altrimenti azzererebbe subito il messaggio)
+      idx = keep;
+      updateDecisionLabel();
+      updateCounts();
+      document.getElementById("done").style.display = "block";
+    }
   } else {
     // uscita dal filtro corrente: chi occupava la sua posizione prende il suo posto
     idx = Math.min(idx, view.length - 1);
@@ -642,7 +691,7 @@ window.addEventListener("mouseup", () => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (document.activeElement && document.activeElement.tagName === "SELECT") return;
+  if (document.activeElement && ["SELECT", "INPUT"].includes(document.activeElement.tagName)) return;
   if (e.key === "s") setDecision("select");
   else if (e.key === "n") setDecision("discard");
   else if (e.key === "r") restoreBoxes();
@@ -650,6 +699,10 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Backspace") setDecision(null);
   else if (e.key === "ArrowRight") { idx = Math.min(idx + 1, view.length - 1); render(); }
   else if (e.key === "ArrowLeft") { idx = Math.max(idx - 1, 0); render(); }
+  else if (e.key === "End") {
+    const i = view.findIndex(n => !(n in decisions));
+    if (i !== -1) { idx = i; render(); }
+  }
   else if ((e.key === "Delete" || e.key === "x") && selectedIndex !== -1) {
     currentBoxes.splice(selectedIndex, 1);
     selectedIndex = -1;
@@ -710,7 +763,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/boxes/"):
             name = unquote(self.path[len("/api/boxes/"):])
             lbl_path = self.dataset_dir / "labels" / f"{Path(name).stem}.txt"
-            self._json({"boxes": read_boxes_file(lbl_path)})
+            backup_path = self.backup_dir / f"{Path(name).stem}.txt"
+            self._json({"boxes": read_boxes_file(lbl_path), "modified": boxes_modified(lbl_path, backup_path)})
         elif self.path == "/api/phashes":
             self._json({"phashes": compute_phashes(self.dataset_dir, self.phash_cache_path)})
         else:
@@ -744,7 +798,8 @@ class Handler(BaseHTTPRequestHandler):
             lbl_path.parent.mkdir(parents=True, exist_ok=True)
             content = "\n".join(lines)
             lbl_path.write_text(content + "\n" if content else "")
-            self._json({"ok": True})
+            backup_path = self.backup_dir / f"{Path(name).stem}.txt"
+            self._json({"ok": True, "modified": boxes_modified(lbl_path, backup_path)})
         elif self.path.startswith("/api/restore-boxes/"):
             name = unquote(self.path[len("/api/restore-boxes/"):])
             lbl_path = self.dataset_dir / "labels" / f"{Path(name).stem}.txt"
@@ -754,7 +809,10 @@ class Handler(BaseHTTPRequestHandler):
                 lbl_path.parent.mkdir(parents=True, exist_ok=True)
                 lbl_path.write_text(backup_path.read_text())
                 restored = True
-            self._json({"ok": True, "restored": restored, "boxes": read_boxes_file(lbl_path)})
+            self._json({
+                "ok": True, "restored": restored, "boxes": read_boxes_file(lbl_path),
+                "modified": boxes_modified(lbl_path, backup_path),
+            })
         else:
             self.send_error(404)
 
