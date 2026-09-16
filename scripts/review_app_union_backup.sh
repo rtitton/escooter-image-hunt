@@ -8,7 +8,7 @@ SOURCE_DIR=$DATA_ROOT/$UNION_DIRNAME
 if [ -n "$2" ]; then
     BACKUP_DIR="$2"
 else
-    BACKUP_DIR="/mnt/x/backup"
+    BACKUP_DIR="/mnt/x/backup/$UNION_DIRNAME"
 fi
 # if $1 is copy_images, then copy images to backup
 if [ "$1" == "copy_images" ]; then
