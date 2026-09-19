@@ -35,7 +35,13 @@ data/processed/union/                                    ▼
 data/processed/union_review_sample/  ── campione con bbox disegnata, per QA visiva
         │
         ▼
-review_app.py  ── selezione manuale finale (s/l/n) → data/review_decisions.json
+review_app.py  ── selezione manuale finale (s/n) → data/processed/union/review_decisions.json
+        │  (materialize_union_reviewed.py)
+        ▼
+data/processed/union_reviewed/            ── solo le immagini "select", pronte all'uso
+        │  (dedupe_phash.py, opzionale)
+        ▼
+data/processed/union_reviewed_phashdedup/ ── dedup pHash a posteriori, soglia libera
 ```
 
 Ogni passo aggiorna anche `data/datasets.json` (indice macchina) e
@@ -81,6 +87,12 @@ $PYTHONCMD scripts/build_visual_check_sample.py
 
 # 5. Web app per review manuale di un dataset in formato yolo con struttura base/images base/labels. (http://localhost:8765)
 $PYTHONCMD scripts/review_app.py
+
+# 6. Materializza la versione finale del dataset (solo le immagini "select")
+$PYTHONCMD scripts/materialize_union_reviewed.py
+
+# 6b. (opzionale) Dedup pHash a posteriori del dataset finale, soglia scelta da riga di comando
+$PYTHONCMD scripts/dedupe_phash.py [soglia]
 ```
 
 `download_dataset.py` e `dedupe_augmented.py` (sezioni 1 e 2 sotto) restano
@@ -350,9 +362,69 @@ python3 scripts/review_app.py [--port 8765]
 
 Apre un server su `http://localhost:<port>`: mostra un'immagine alla volta
 con le bbox disegnate (canvas HTML) e registra la decisione con un tasto —
-`s` seleziona, `l` seleziona con riserva, `n` scarta, frecce per navigare
-senza decidere, backspace per cancellare la decisione corrente. Ogni
-decisione è salvata subito in `data/review_decisions.json`: la sessione si
-può interrompere e riprendere quando si vuole, ripartendo dalla prima
-immagine ancora senza decisione.
+`s` seleziona, `n` scarta, frecce per navigare senza decidere, `end` per
+saltare alla prima immagine non ancora revisionata, backspace per
+cancellare la decisione corrente. Le bbox sono anche modificabili
+direttamente sul canvas (creare/spostare/ridimensionare/eliminare, con
+ripristino dell'originale). Barra di filtro/ordinamento per dataset
+sorgente, stato e pHash. Ogni decisione è salvata subito in
+`data/processed/union/review_decisions.json`: la sessione si può
+interrompere e riprendere quando si vuole, ripartendo dalla prima immagine
+ancora senza decisione.
+
+## 7. Materializzazione del dataset finale — `materialize_union_reviewed.py`
+
+Copia in una cartella a parte solo le immagini con decisione `select` in
+`review_decisions.json`, insieme ai rispettivi label — che riflettono già
+le eventuali modifiche alle bbox fatte durante la review, essendo scritti
+subito su disco da `review_app.py`. A differenza di
+`build_bydataset_annotated.py` (bbox disegnate, cartelle separate per
+dataset sorgente, pensato per il controllo visivo) qui l'output è un
+dataset YOLO pronto all'uso: stessa struttura `images/`+`labels/` del
+dataset sorgente, nomi file invariati.
+
+```
+python3 scripts/materialize_union_reviewed.py
+    [--source-dir DIR] [--decisions-file FILE] [--out-dir DIR] [--limit N]
+```
+
+- default: sorgente `data/processed/union/`, decisioni
+  `<source-dir>/review_decisions.json`, output
+  `data/processed/union_reviewed/`
+- avvisa a console se restano immagini del sorgente senza decisione (review
+  non completa) senza per questo bloccare l'esecuzione
+- stampa per ogni dataset sorgente quante immagini sono state selezionate
+  sul totale disponibile (`<id>: N / M immagini selezionate`)
+- ad ogni esecuzione la cartella di output viene svuotata e ripopolata
+
+## 8. (opzionale) Dedup pHash a posteriori — `dedupe_phash.py`
+
+Deduplica per contenuto (perceptual hash) `data/processed/union_reviewed/`,
+raggruppando in cluster le immagini a distanza di Hamming ≤ soglia e
+tenendo per ciascun cluster solo quella con più bbox escooter annotate (a
+parità, il nome file più piccolo). A differenza della dedup cross-dataset
+di `select_images.py` — eseguita *prima* della selezione/review, con soglia
+stretta per non perdere varietà — questo script opera *dopo* la review
+manuale, con una soglia scelta liberamente da riga di comando: utile per
+stringere la dedup a posteriori (es. per un dataset di validazione senza
+quasi-duplicati) senza dover rifare selezione o review.
+
+```
+python3 scripts/dedupe_phash.py [soglia] [--source-dir DIR] [--out-dir DIR] [--phash-cache FILE]
+```
+
+- `soglia` (posizionale, opzionale): distanza di Hamming massima fra due
+  pHash perché due immagini siano quasi-duplicate (default:
+  `PHASH_DISTANCE_THRESHOLD` di `.env`, di norma 10)
+- default: sorgente `data/processed/union_reviewed/`, output
+  `data/processed/union_reviewed_phashdedup/`
+- le immagini escluse (quelle "in più" di ogni cluster) non vengono
+  cancellate: restano, con le rispettive label, in `<out-dir>/excluded/`
+- riusa la cache pHash di `review_app.py` (stesso meccanismo di
+  invalidazione per mtime/size), quindi è economico rilanciarlo con soglie
+  diverse per confrontarle
+- stampa a console le immagini escluse per dataset sorgente, il numero di
+  cluster di quasi-duplicati trovati e i totali; log dettagliato (immagine
+  scartata → immagine tenuta, distanza) in
+  `data/logs/dedupe_phash-t<soglia>.log`
 

@@ -39,6 +39,10 @@ PHASH_CACHE_PATH = DATA_ROOT / os.environ.get("PHASH_CACHE_FILENAME", "cache/pha
 SELECT_IMAGES_LOG_PATH = DATA_ROOT / os.environ.get("SELECT_IMAGES_LOG_FILENAME", "logs/select_images.log")
 UNION_DIR = DATA_ROOT / os.environ.get("UNION_DIRNAME", "processed/union")
 UNION_REVIEW_SAMPLE_DIR = DATA_ROOT / os.environ.get("UNION_REVIEW_SAMPLE_DIRNAME", "processed/union_review_sample")
+UNION_REVIEWED_DIR = DATA_ROOT / os.environ.get("UNION_REVIEWED_DIRNAME", "processed/union_reviewed")
+UNION_REVIEWED_PHASHDEDUP_DIR = DATA_ROOT / os.environ.get(
+    "UNION_REVIEWED_PHASHDEDUP_DIRNAME", "processed/union_reviewed_phashdedup"
+)
 RIDER_CONTAMINATED_DIR = DATA_ROOT / os.environ.get("RIDER_CONTAMINATED_DIRNAME", "processed/rider_contaminated")
 BYDATASET_DIR = DATA_ROOT / os.environ.get("BYDATASET_DIRNAME", "processed/bydataset")
 
