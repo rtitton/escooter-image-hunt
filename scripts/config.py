@@ -45,6 +45,19 @@ UNION_REVIEWED_PHASHDEDUP_DIR = DATA_ROOT / os.environ.get(
 )
 RIDER_CONTAMINATED_DIR = DATA_ROOT / os.environ.get("RIDER_CONTAMINATED_DIRNAME", "processed/rider_contaminated")
 BYDATASET_DIR = DATA_ROOT / os.environ.get("BYDATASET_DIRNAME", "processed/bydataset")
+UNION_REVIEWED_COCO_DIR = DATA_ROOT / os.environ.get("UNION_REVIEWED_COCO_DIRNAME", "processed/union_reviewed_coco")
+COCO_ANNOTATION_CACHE_PATH = DATA_ROOT / os.environ.get(
+    "COCO_ANNOTATION_CACHE_FILENAME", "cache/coco_annotation_cache.json"
+)
+# elenco delle detection scartate per overlap con bbox escooter (classi sosia), per revisione manuale
+FLAGGED_COCO_OVERLAP_PATH = DATA_ROOT / os.environ.get(
+    "FLAGGED_COCO_OVERLAP_FILENAME", "flagged_coco_overlap.txt"
+)
+# elenco (un nome immagine per riga) delle immagini per cui, dopo revisione manuale del file sopra,
+# lo scarto per overlap sosia va disattivato (la detection va invece tenuta)
+COCO_OVERLAP_RESCUE_PATH = DATA_ROOT / os.environ.get(
+    "COCO_OVERLAP_RESCUE_FILENAME", "coco_overlap_rescue.txt"
+)
 
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
@@ -70,6 +83,38 @@ COCO_BATCH_SIZE = _env_int("COCO_BATCH_SIZE", 16)
 VARIETY_CACHE_SAVE_EVERY = _env_int("VARIETY_CACHE_SAVE_EVERY", 20)
 VARIETY_MIN_INSTANCES = _env_int("VARIETY_MIN_INSTANCES", 1)  # istanze COCO minime nell'orientazione originale perché un'immagine sia di buona varietà
 
+# --- Annotazione classi COCO sul dataset finale (annotate_coco_classes.py) ---
+# soglia di confidenza usata durante l'inferenza (e quindi salvata in cache): bassa di proposito,
+# per poter ritarare COCO_ANNOTATION_CONF_THRESHOLD senza dover rifare l'inferenza
+COCO_ANNOTATION_CAPTURE_CONF = _env_float("COCO_ANNOTATION_CAPTURE_CONF", 0.1)
+# soglia di confidenza effettiva applicata in scrittura: più alta della capture conf perché qui
+# le detection diventano etichette di training permanenti (un falso positivo pesa più di un mancato rilevamento)
+COCO_ANNOTATION_CONF_THRESHOLD = _env_float("COCO_ANNOTATION_CONF_THRESHOLD", 0.45)
+# frazione di area di una detection COCO coperta da una bbox escooter oltre la quale viene scartata
+# perché ritenuta lo stesso oggetto fisico (es. monopattino misclassificato come bicicletta, o il
+# solo pianale letto come skateboard/snowboard); non è un IoU simmetrico apposta, per catturare
+# anche i casi in cui la detection COCO è molto più piccola della bbox escooter
+COCO_ESCOOTER_OVERLAP_THRESHOLD = _env_float("COCO_ESCOOTER_OVERLAP_THRESHOLD", 0.6)
+# classi COCO plausibili come misclassificazione dell'intero monopattino o di una sua parte (bici,
+# moto, skateboard, snowboard): solo queste sono soggette allo scarto per overlap sopra. Applicarlo
+# a tutte le classi scarterebbe anche oggetti reali chiaramente distinti (es. un'auto o una borsa)
+# che ricadono per intero nella bbox escooter solo per prospettiva/profondità, non perché coincidano
+# fisicamente con essa (v. PIPELINE.md sezione 9)
+COCO_ESCOOTER_LOOKALIKE_CLASSES = {
+    int(v) for v in os.environ.get("COCO_ESCOOTER_LOOKALIKE_CLASSES", "1,3,31,36").split(",")
+}
+# classi COCO implausibili in una scena esterna (marciapiede/strada) come quelle del dataset:
+# oggetti da interno (elettrodomestici, arredo da cucina/bagno) che se rilevati sono quasi certamente
+# un errore di classificazione ad alta confidenza, non intercettabile alzando la sola soglia generale
+# senza perdere moltissimo recall altrove. Scartate a prescindere dalla confidenza. Stringa vuota per
+# disattivare il filtro (nessuna classe scartata per implausibilità)
+_IMPLAUSIBLE_DEFAULT = "40,42,44,57,59,60,61,62,64,65,66,68,69,70,71,72,78,79"  # wine glass, fork, spoon,
+# couch, bed, dining table, toilet, tv, mouse, remote, keyboard, microwave, oven, toaster, sink,
+# refrigerator, hair drier, toothbrush
+_implausible_env = os.environ.get("COCO_IMPLAUSIBLE_CLASSES", _IMPLAUSIBLE_DEFAULT)
+COCO_IMPLAUSIBLE_CLASSES = {int(v) for v in _implausible_env.split(",") if v.strip()}
+COCO_ANNOTATION_CACHE_SAVE_EVERY = _env_int("COCO_ANNOTATION_CACHE_SAVE_EVERY", 20)
+
 # --- Dedupe augmented (dedupe_augmented.py) ---
 BLACK_THRESHOLD = _env_int("BLACK_THRESHOLD", 10)
 EDGE_SAMPLE = _env_int("EDGE_SAMPLE", 30)
@@ -78,6 +123,10 @@ EDGE_SAMPLE = _env_int("EDGE_SAMPLE", 30)
 BOX_COLOR = tuple(int(v) for v in os.environ.get("BOX_COLOR", "255,0,0").split(","))
 BOX_WIDTH = _env_int("BOX_WIDTH", 4)
 PERSON_BOX_COLOR = tuple(int(v) for v in os.environ.get("PERSON_BOX_COLOR", "0,255,0").split(","))
+# colore delle bbox delle altre classi COCO (diverse da persona), disegnate da annotate_coco_classes.py --sample
+COCO_BOX_COLOR = tuple(int(v) for v in os.environ.get("COCO_BOX_COLOR", "0,128,255").split(","))
+# colore delle bbox scartate per overlap sosia, disegnate da annotate_coco_classes.py --export-flagged-sample
+COCO_FLAGGED_BOX_COLOR = tuple(int(v) for v in os.environ.get("COCO_FLAGGED_BOX_COLOR", "255,140,0").split(","))
 
 # --- App di revisione (review_app.py) ---
 REVIEW_APP_PORT = _env_int("REVIEW_APP_PORT", 8765)

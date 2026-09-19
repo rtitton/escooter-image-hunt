@@ -42,6 +42,9 @@ data/processed/union_reviewed/            ── solo le immagini "select", pron
         │  (dedupe_phash.py, opzionale)
         ▼
 data/processed/union_reviewed_phashdedup/ ── dedup pHash a posteriori, soglia libera
+        │  (annotate_coco_classes.py)
+        ▼
+data/processed/union_reviewed_coco/       ── + classi COCO annotate, pronto per il training
 ```
 
 Ogni passo aggiorna anche `data/datasets.json` (indice macchina) e
@@ -93,6 +96,9 @@ $PYTHONCMD scripts/materialize_union_reviewed.py
 
 # 6b. (opzionale) Dedup pHash a posteriori del dataset finale, soglia scelta da riga di comando
 $PYTHONCMD scripts/dedupe_phash.py [soglia]
+
+# 7. Annotazione delle classi COCO sul dataset finale (oltre alla classe escooter già presente)
+$PYTHONCMD scripts/annotate_coco_classes.py
 ```
 
 `download_dataset.py` e `dedupe_augmented.py` (sezioni 1 e 2 sotto) restano
@@ -292,8 +298,9 @@ output viene svuotata e ripopolata.
 Copia le immagini di un elenco (di norma `data/selected_images.txt`) in una
 cartella piatta, tenendo solo la classe escooter rimappata a id `80` (le
 eventuali altre classi dei dataset sorgente vengono scartate — le classi
-COCO saranno annotate in un passo successivo, non ancora implementato, con
-un modello pretrained di grandi dimensioni).
+COCO vengono annotate in un passo successivo, sul dataset finale, da
+`annotate_coco_classes.py` con un modello pretrained di grandi dimensioni;
+v. sezione 9).
 
 ```
 python3 scripts/build_union_dataset.py [--candidates-file ...] [--out-dir ...] [--limit N]
@@ -427,4 +434,100 @@ python3 scripts/dedupe_phash.py [soglia] [--source-dir DIR] [--out-dir DIR] [--p
   cluster di quasi-duplicati trovati e i totali; log dettagliato (immagine
   scartata → immagine tenuta, distanza) in
   `data/logs/dedupe_phash-t<soglia>.log`
+
+## 9. Annotazione classi COCO — `annotate_coco_classes.py`
+
+Ultimo passo: annota tutte le classi COCO (0-79) sul dataset finale, in
+aggiunta alla classe escooter (80) già presente. Usa lo stesso modello
+Ultralytics pretrained di grandi dimensioni del filtro varietà
+(`COCO_MODEL`, di norma `yolo11l.pt`), ma su una cache dedicata che salva
+anche la confidence di ogni detection (non solo classe e bbox) a una soglia
+di cattura bassa (`COCO_ANNOTATION_CAPTURE_CONF`, default 0.1): questo
+separa il costo dell'inferenza — fatta una volta — dalla soglia di
+confidenza effettiva (`COCO_ANNOTATION_CONF_THRESHOLD`, default 0.45,
+applicata in scrittura), ritarabile senza ricalcolare nulla. La soglia
+effettiva è più conservativa del default Ultralytics (0.25) perché qui le
+detection diventano etichette di training permanenti: un falso positivo pesa
+più di un mancato rilevamento.
+
+Una detection di classe "sosia" del monopattino (`COCO_ESCOOTER_LOOKALIKE_
+CLASSES`, default `bicycle,motorcycle,snowboard,skateboard`) viene scartata
+se la sua bbox è coperta per più di `COCO_ESCOOTER_OVERLAP_THRESHOLD`
+(default 0.6, frazione di area della detection, non IoU simmetrico) da una
+bbox escooter dell'immagine: è quasi certamente lo stesso oggetto fisico,
+tenuto per intero o in parte (es. quando il modello rileva solo il pianale,
+come `skateboard`/`snowboard`), e tenerla creerebbe due etichette
+contraddittorie sulla stessa area. Usare la frazione di area della
+detection invece dell'IoU è importante: una detection molto più piccola
+della bbox escooter (es. il solo pianale) può ricadere quasi per intero al
+suo interno pur avendo IoU basso, per la differenza di area — l'IoU da solo
+non la catturerebbe.
+
+Il controllo è **limitato alle classi sosia**, non esteso a tutte: una
+prima versione di questo script scartava qualunque classe diversa da
+"persona" sopra soglia, ma questo eliminava anche oggetti reali chiaramente
+distinti (un'auto, una borsa, una panchina sullo sfondo...) il cui bbox
+ricadeva per intero in quello, spesso ampio, del monopattino solo per
+prospettiva/profondità — non perché coincidessero fisicamente con esso (il
+caso descritto in `todo.md`: "posso avere un oggetto dietro il
+monopattino"). "Persona" non è comunque mai nella lista: il conducente è
+una detection legittima da annotare, non un duplicato.
+
+Anche ristretto alle classi sosia il criterio resta geometrico e non
+infallibile — verificato empiricamente su un campione casuale: un oggetto
+sosia reale (tipicamente una bici vera) parcheggiato proprio dietro/accanto
+al monopattino può avere la stessa containment di un vero doppione, e non
+esiste una soglia che separi in modo pulito i due casi (i falsi scarti non
+si concentrano a containment basso). Per questo ogni detection scartata per
+overlap sosia viene **segnalata, non solo buttata via**, in
+`FLAGGED_COCO_OVERLAP_PATH` (default `data/flagged_coco_overlap.txt`), con
+classe, confidence e containment. `--export-flagged-sample N` esporta un
+campione casuale con le bbox disegnate (escooter in rosso, scartata in
+arancione) per la revisione visiva; le immagini per cui si decide di
+recuperare le detection sosia vanno aggiunte, un nome per riga, a
+`COCO_OVERLAP_RESCUE_PATH` (default `data/coco_overlap_rescue.txt`) — al
+run successivo lo scarto per overlap non viene applicato per quelle
+immagini, senza rifare l'inferenza (riusa la cache).
+
+Indipendentemente da confidenza e overlap, le detection di una classe
+**implausibile in una scena esterna** (`COCO_IMPLAUSIBLE_CLASSES`, default
+oggetti da interno come `toilet`, `couch`, `tv`, `sink`, elettrodomestici da
+cucina/bagno — lista completa in `scripts/.env`) vengono sempre scartate:
+sono quasi sempre un errore di classificazione ad alta confidenza (es. un
+cestino/scatola sullo sfondo letto come `toilet`), non intercettabile
+alzando la sola soglia generale senza perdere molto recall altrove. Lista
+liberamente modificabile in `scripts/.env`; una stringa vuota la disattiva
+in permanenza, `--no-implausible-filter` la disattiva per una singola
+esecuzione.
+
+Solo l'orientazione nativa dell'immagine (le immagini di
+`union_reviewed_phashdedup` non sono ruotate/corrette).
+
+```
+python3 scripts/annotate_coco_classes.py
+    [--source-dir DIR] [--out-dir DIR] [--cache-path FILE] [--model NAME]
+    [--batch-size N] [--capture-conf F] [--conf-threshold F]
+    [--overlap-threshold F] [--no-implausible-filter] [--refresh-cache]
+    [--limit N] [--sample N] [--sample-dir DIR] [--flagged-path FILE]
+    [--rescue-path FILE] [--export-flagged-sample N] [--flagged-sample-dir DIR]
+```
+
+- default: sorgente `data/processed/union_reviewed_phashdedup/`, output
+  `data/processed/union_reviewed_coco/` — dataset pronto per il training
+- ad ogni esecuzione la cartella di output viene svuotata e ripopolata; le
+  righe classe escooter vengono rilette dal sorgente e riscritte tali e
+  quali (eventuali righe COCO di un'esecuzione precedente di questo script
+  vengono ignorate e ricalcolate, per idempotenza)
+- `--export-flagged-sample N` esporta un campione casuale di N detection
+  scartate per overlap sosia (bbox escooter in rosso, scartata in
+  arancione) in `<out-dir>_flagged_sample/` (o `--flagged-sample-dir`), per
+  decidere quali recuperare aggiungendole a `--rescue-path`
+- `--sample N` esporta dopo l'annotazione un campione casuale di N immagini
+  con le bbox disegnate (escooter in rosso, persona in verde, altre classi
+  COCO in blu con nome classe e confidence) in `<out-dir>_sample/` (o
+  `--sample-dir`), per una verifica visiva della soglia scelta prima di
+  considerare il dataset definitivo
+- stampa a console il totale di istanze annotate per classe COCO, il numero
+  di detection scartate per overlap con una bbox escooter e quelle scartate
+  per classe implausibile; log in `data/logs/annotate_coco_classes.log`
 

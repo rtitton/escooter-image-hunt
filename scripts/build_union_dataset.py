@@ -4,9 +4,9 @@ cartella di destinazione (di norma il dataset di unione).
 
 Per ogni immagine candidata copia il file immagine e scrive un file di label
 con le sole istanze escooter, rimappate alla classe 80 — le altre classi dei
-dataset sorgente vengono scartate: le classi COCO saranno annotate in un
-passo successivo con un modello Ultralytics pretrained di grandi dimensioni
-(vedi README.md).
+dataset sorgente vengono scartate: le classi COCO vengono annotate in un
+passo successivo (annotate_coco_classes.py) con un modello Ultralytics
+pretrained di grandi dimensioni, sul dataset finale (vedi README.md).
 
 I file di destinazione sono prefissati con l'id del dataset sorgente per
 evitare collisioni di nome tra dataset diversi.

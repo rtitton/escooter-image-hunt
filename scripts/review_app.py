@@ -3,7 +3,10 @@
 YOLO, organizzato in due sottocartelle images/ e labels/ (un file .txt per
 immagine, righe "classe xc yc w h" normalizzate 0..1).
 
-Mostra un'immagine alla volta con le bbox disegnate (canvas HTML), e
+Mostra un'immagine alla volta con le bbox disegnate (canvas HTML) — colorate
+per classe con etichetta testuale (nomi COCO standard 0-79, l'escooter
+sempre in rosso), utile anche su dataset multi-classe come
+union_reviewed_coco e non solo sul dataset di unione a classe singola — e
 registra la decisione dell'utente con un tasto:
     s = seleziona
     n = scarta
@@ -344,6 +347,37 @@ function updateCounts() {
 }
 
 const DEFAULT_CLASS = __ESCOOTER_CLASS_ID__;
+
+// Nomi classe COCO standard (id 0-79, ordine Ultralytics) e palette categorica per il
+// colore delle bbox: utile sui dataset con più classi (es. union_reviewed_coco), dove le
+// bbox non sono tutte escooter. L'escooter (DEFAULT_CLASS) mantiene il rosso di sempre.
+const COCO_NAMES = [
+  "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+  "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+  "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack",
+  "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball",
+  "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+  "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+  "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+  "couch", "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+  "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator",
+  "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+];
+const CLASS_PALETTE = [
+  "#4cc9f0", "#4895ef", "#4361ee", "#7209b7", "#b5179e", "#f72585", "#ff9e00", "#ffca3a",
+  "#8ac926", "#52b788", "#219ebc", "#fb8500", "#a8dadc", "#ffb4a2", "#cdb4db", "#90e0ef",
+  "#ff6d00", "#06d6a0", "#ffd166", "#c77dff",
+];
+
+function classLabel(cls) {
+  if (cls === DEFAULT_CLASS) return "escooter";
+  return COCO_NAMES[cls] || String(cls);
+}
+
+function classColor(cls) {
+  if (cls === DEFAULT_CLASS) return "#ff2d55";
+  return CLASS_PALETTE[((cls % CLASS_PALETTE.length) + CLASS_PALETTE.length) % CLASS_PALETTE.length];
+}
 const HANDLE_SIZE = 10;
 const MIN_BOX_PX = 6;
 const CURSOR_FOR_HANDLE = {
@@ -400,15 +434,29 @@ function resizeCanvas() {
   canvas.style.height = img.clientHeight + "px";
 }
 
+function drawBoxLabel(r, text, color) {
+  ctx.font = "12px system-ui, sans-serif";
+  const padX = 4, padY = 2;
+  const w = ctx.measureText(text).width + padX * 2;
+  const h = 14 + padY * 2;
+  const x = r.x, y = Math.max(0, r.y - h);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = color;
+  ctx.fillText(text, x + padX, y + h - padY - 3);
+}
+
 function drawBoxes(boxes) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (boxesVisible) {
     boxes.forEach((b, i) => {
       const r = boxPixelRect(b);
       const selected = i === selectedIndex;
-      ctx.strokeStyle = selected ? "#ffd60a" : "#ff2d55";
+      const color = classColor(b.cls);
+      ctx.strokeStyle = selected ? "#ffd60a" : color;
       ctx.lineWidth = selected ? 3 : 2;
       ctx.strokeRect(r.x, r.y, r.w, r.h);
+      drawBoxLabel(r, classLabel(b.cls), selected ? "#ffd60a" : color);
       if (selected) {
         ctx.fillStyle = "#ffd60a";
         for (const h of handlesFor(r)) {
