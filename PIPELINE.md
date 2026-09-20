@@ -451,17 +451,29 @@ detection diventano etichette di training permanenti: un falso positivo pesa
 più di un mancato rilevamento.
 
 Una detection di classe "sosia" del monopattino (`COCO_ESCOOTER_LOOKALIKE_
-CLASSES`, default `bicycle,motorcycle,snowboard,skateboard`) viene scartata
-se la sua bbox è coperta per più di `COCO_ESCOOTER_OVERLAP_THRESHOLD`
-(default 0.6, frazione di area della detection, non IoU simmetrico) da una
-bbox escooter dell'immagine: è quasi certamente lo stesso oggetto fisico,
-tenuto per intero o in parte (es. quando il modello rileva solo il pianale,
-come `skateboard`/`snowboard`), e tenerla creerebbe due etichette
-contraddittorie sulla stessa area. Usare la frazione di area della
-detection invece dell'IoU è importante: una detection molto più piccola
-della bbox escooter (es. il solo pianale) può ricadere quasi per intero al
-suo interno pur avendo IoU basso, per la differenza di area — l'IoU da solo
-non la catturerebbe.
+CLASSES`, default `bicycle,motorcycle,parking meter,snowboard,skateboard`)
+viene scartata se la sua bbox è coperta per più di `COCO_ESCOOTER_OVERLAP_
+THRESHOLD` (default 0.6, frazione di area della detection) dall'**unione**
+delle bbox escooter dell'immagine: è quasi certamente lo stesso oggetto
+fisico, tenuto per intero o in parte (es. quando il modello rileva solo il
+pianale, come `skateboard`/`snowboard`, o solo lo stelo/manubrio, come
+`parking meter` — un oggetto verticale sottile scambiato per un altro,
+verificato empiricamente responsabile della maggioranza delle istanze
+`parking meter` altrimenti annotate), e tenerla creerebbe due etichette
+contraddittorie sulla stessa area. Due scelte deliberate rispetto a un
+semplice IoU contro la bbox escooter più vicina:
+- **frazione di area della detection, non IoU simmetrico**: una detection
+  molto più piccola della bbox escooter (es. il solo pianale) può ricadere
+  quasi per intero al suo interno pur avendo IoU basso, per la differenza
+  di area — l'IoU da solo non la catturerebbe;
+- **unione delle bbox escooter, non la singola più vicina**: in una fila di
+  monopattini ravvicinati (dock di sharing, parcheggi fitti) una detection
+  sosia può ricadere a cavallo di due bbox escooter adiacenti — containment
+  basso contro ciascuna singolarmente (l'area si divide fra le due) pur
+  essendo quasi interamente coperta da *qualche* escooter nel complesso.
+  Caso osservato in pratica (v. `union_containment_ratio()` in
+  `annotate_coco_classes.py`, calcolata per campionamento su una griglia
+  nella bbox, esatta a meno dell'errore di discretizzazione).
 
 Il controllo è **limitato alle classi sosia**, non esteso a tutte: una
 prima versione di questo script scartava qualunque classe diversa da
@@ -530,4 +542,57 @@ python3 scripts/annotate_coco_classes.py
 - stampa a console il totale di istanze annotate per classe COCO, il numero
   di detection scartate per overlap con una bbox escooter e quelle scartate
   per classe implausibile; log in `data/logs/annotate_coco_classes.log`
+
+## 9b. Revisione manuale e materializzazione finale
+
+Dopo l'annotazione COCO si può rivedere il dataset a occhio con
+`review_app.py` (`scripts/review_app_union_reviewed_coco.sh`), che segnala
+anche i casi flaggati per overlap sosia (v. sopra). Le modifiche alle bbox
+sono scritte subito nei label di `union_reviewed_coco/`; per ottenere una
+copia pulita con solo le immagini decise "select" (escludendo quelle
+scartate durante questa revisione), si usa
+`scripts/materialize_union_reviewed_coco.sh`, che richiama
+`materialize_union_reviewed.py` con sorgente/output appropriati
+(`UNION_REVIEWED_COCO_DIRNAME` → `UNION_REVIEWED_COCO_FINAL_DIRNAME`). Da
+rilanciare ogni volta che si riprende la revisione.
+
+## 10. Split train/valid — `split_dataset.py`
+
+Ultimo passo prima del training: divide un dataset YOLO (`images/` +
+`labels/`, tipicamente `union_reviewed_coco_final/`) in `train/` e
+`valid/`, scrivendo anche un `data.yaml` pronto per Ultralytics (classi
+COCO 0-79 + escooter 80, lo schema fisso del progetto — non dedotto dalle
+label presenti, è sempre quello completo).
+
+Lo split è **stratificato per dataset sorgente** (prefisso `<dataset_id>__`
+nel nome file): senza, un dataset sorgente piccolo potrebbe finire per caso
+quasi tutto in un solo split. All'interno di ogni dataset sorgente, le
+immagini che sembrano frame consecutivi della stessa ripresa (nomi tipo
+`frame_00010`, stessa euristica di `clip_and_frame()` in
+`select_images.py`, duplicata qui per non dipendere da quel modulo)
+vengono tenute nello stesso split: frame vicini nel tempo sono
+quasi-duplicati, e separarli fra train e valid farebbe trapelare
+informazione, gonfiando artificialmente le metriche di validazione. I
+gruppi sono assegnati con un bilanciamento greedy per deficit (euristica
+LPT — dal gruppo più grande al più piccolo, ogni gruppo va allo split che
+ne ha più bisogno per avvicinarsi al proprio target): necessario perché
+diversi dataset sorgente sono di fatto un'unica clip lunga (centinaia di
+frame consecutivi), e un riempimento ingenuo può sbilanciare l'intero
+dataset su un solo split. Quando un dataset sorgente è essenzialmente una
+sola clip, finisce inevitabilmente tutto in un solo split (di norma train)
+— non c'è modo di dargli rappresentanza in valid senza leakage.
+
+Split deterministico (`--seed`, default 42), a differenza del
+campionamento senza seme di `build_visual_check_sample.py`: qui la
+riproducibilità conta, per confrontare run di training diversi sugli
+stessi identici split.
+
+```
+python3 scripts/split_dataset.py <dataset_dir>
+    [--out-dir DIR] [--valid-frac F] [--seed N] [--no-clip-grouping]
+```
+
+- default: `--out-dir <dataset_dir>_split`, `--valid-frac 0.15`
+- ad ogni esecuzione la cartella di output viene svuotata e ripopolata
+- stampa il totale train/valid e il dettaglio per dataset sorgente
 

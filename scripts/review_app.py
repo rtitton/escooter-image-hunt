@@ -15,6 +15,15 @@ registra la decisione dell'utente con un tasto:
     campo "vai a immagine" (in alto): salta alla N-esima immagine dell'elenco corrente
     backspace = cancella la decisione sull'immagine corrente
 
+Se l'immagine corrente compare in --flagged-path (default il
+flagged_coco_overlap.txt di annotate_coco_classes.py: detection di classe
+sosia del monopattino scartate per overlap, v. PIPELINE.md sezione 9), lo
+segnala con una fascia arancione sopra l'immagine, con classe/confidence/
+containment di ogni detection scartata — utile per decidere quali
+recuperare in coco_overlap_rescue.txt senza dover incrociare a mano il file
+di testo. Nessun effetto se il file non esiste (es. su dataset diversi da
+union_reviewed_coco).
+
 Filtri e ordinamento (barra sotto la testata): si può filtrare l'elenco
 per dataset di origine (dedotto dal prefisso "<dataset_id>__" nel nome
 file) e per stato (selezionata / scartata / non revisionata), e ordinarlo
@@ -40,7 +49,7 @@ si vuole, riparte dalla prima immagine ancora senza decisione.
 
 Avvio:
     python3 scripts/review_app.py <dataset_dir> [--port 8765]
-        [--decisions-file FILE] [--backup-dir DIR]
+        [--decisions-file FILE] [--backup-dir DIR] [--flagged-path FILE]
 
 <dataset_dir> deve contenere le sottocartelle images/ e labels/. Se non
 specificati, --decisions-file e --backup-dir vengono creati dentro
@@ -102,6 +111,35 @@ def boxes_modified(lbl_path: Path, backup_path: Path) -> bool:
     return read_boxes_file(lbl_path) != read_boxes_file(backup_path)
 
 
+def load_flagged(path: Path) -> dict:
+    """Nome immagine -> lista di detection scartate per overlap sosia
+    (formato scritto da annotate_coco_classes.py in FLAGGED_COCO_OVERLAP_
+    PATH: righe "nome\\tclasse\\tconf=X.XX\\tcontainment=X.XX\\tcls xc yc w
+    h", righe vuote o che iniziano per # ignorate), ognuna con
+    {"label": descrizione testuale, "box": [cls, xc, yc, w, h]} — il box
+    serve a disegnarla sul canvas di revisione, tratteggiata, insieme a
+    quelle rimaste nel dataset. Dizionario vuoto se il file non esiste
+    (dataset diverso da union_reviewed_coco, o mai generato): la
+    segnalazione a video resta semplicemente disattivata."""
+    if not path.exists():
+        return {}
+    flagged: dict = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) != 5:
+            continue
+        name, cls, conf, containment, label_line = parts
+        box_parts = label_line.split()
+        if len(box_parts) != 5:
+            continue
+        box = [int(float(box_parts[0]))] + [float(v) for v in box_parts[1:]]
+        flagged.setdefault(name, []).append({"label": f"{cls} {conf} {containment}", "box": box})
+    return flagged
+
+
 def compute_phashes(dataset_dir: Path, cache_path: Path) -> dict:
     """pHash di ogni immagine del dataset, con cache su disco (invalidata per
     mtime/size, come la cache pHash della pipeline principale in
@@ -157,6 +195,7 @@ PAGE = """<!doctype html>
   #restore-btn:hover { background: #444; }
   #done { display: none; text-align: center; margin-top: 80px; font-size: 22px; }
   #empty { display: none; text-align: center; margin-top: 80px; font-size: 18px; color: #888; }
+  #flagged-banner { display: none; padding: 8px 16px; background: #4a2f00; color: #ffcc66; border-bottom: 1px solid #a66a00; font-size: 13px; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -203,6 +242,7 @@ PAGE = """<!doctype html>
   </label>
   <span id="phash-status"></span>
 </div>
+<div id="flagged-banner"></div>
 <div id="stage">
   <img id="img">
   <canvas id="canvas"></canvas>
@@ -225,6 +265,7 @@ PAGE = """<!doctype html>
 <script>
 let names = [];
 let decisions = {};
+let flagged = {}; // {name: [descrizioni]} detection scartate per overlap sosia, v. load_flagged()
 let phashes = null; // caricato pigramente, {name: hex}, solo se serve per l'ordinamento
 let view = [];       // elenco filtrato/ordinato attualmente in navigazione
 let idx = 0;
@@ -257,6 +298,7 @@ async function loadState() {
   const data = await r.json();
   names = data.names;
   decisions = data.decisions;
+  flagged = data.flagged;
   populateDatasetFilter();
   computeView();
   idx = view.findIndex(n => !(n in decisions));
@@ -388,10 +430,12 @@ const CURSOR_FOR_HANDLE = {
 };
 
 let currentBoxes = []; // [{cls, xc, yc, w, h}, ...] normalizzati 0..1
+let currentFlagged = []; // [{cls, xc, yc, w, h, label}, ...] scartate per overlap sosia, sola lettura
 let selectedIndex = -1;
 let drag = null;
 let creatingRect = null;
 let boxesVisible = true;
+const FLAGGED_COLOR = "#ff8c00";
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
@@ -463,6 +507,19 @@ function drawBoxes(boxes) {
           ctx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
         }
       }
+    });
+    // detection scartate per overlap sosia (v. flagged_coco_overlap.txt): non sono nel label,
+    // quindi non selezionabili/modificabili — solo lettura, tratteggiate per distinguerle da
+    // quelle rimaste nel dataset, in un colore dedicato indipendente dalla classe.
+    currentFlagged.forEach(b => {
+      const r = boxPixelRect(b);
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = FLAGGED_COLOR;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.restore();
+      drawBoxLabel(r, classLabel(b.cls) + " (scartata)", FLAGGED_COLOR);
     });
   }
   // il rettangolo in corso di creazione resta visibile anche a bbox nascoste:
@@ -558,6 +615,7 @@ async function render() {
   document.getElementById("res-info").textContent = "";
   updateDecisionLabel();
   updateCounts();
+  updateFlaggedBanner(name);
 
   const boxesPromise = fetch("/api/boxes/" + encodeURIComponent(name)).then(r => r.json());
   const imageLoaded = new Promise((resolve) => { img.onload = resolve; });
@@ -568,6 +626,10 @@ async function render() {
   document.getElementById("res-info").textContent = img.naturalWidth + " × " + img.naturalHeight + " px";
   setModifiedBadge(boxesData.modified);
   currentBoxes = boxesData.boxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
+  currentFlagged = (flagged[name] || []).map(f => {
+    const [cls, xc, yc, w, h] = f.box;
+    return { cls, xc, yc, w, h };
+  });
   selectedIndex = -1;
   drag = null;
   creatingRect = null;
@@ -583,6 +645,19 @@ function updateDecisionLabel() {
   if (d === "select") { el.textContent = "SELEZIONATA"; el.className = "sel"; }
   else if (d === "discard") { el.textContent = "SCARTATA"; el.className = "disc"; }
   else { el.textContent = "-"; }
+}
+
+function updateFlaggedBanner(name) {
+  const entries = flagged[name];
+  const banner = document.getElementById("flagged-banner");
+  if (entries && entries.length) {
+    banner.textContent = "⚠ " + entries.length + " detection scartate per overlap con l'escooter, "
+      + "disegnate tratteggiate in arancione (valuta il recupero in coco_overlap_rescue.txt): "
+      + entries.map(e => e.label).join("  ·  ");
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
 }
 
 async function setDecision(decision) {
@@ -776,6 +851,7 @@ class Handler(BaseHTTPRequestHandler):
     decisions_path: Path
     backup_dir: Path
     phash_cache_path: Path
+    flagged_path: Path
 
     def _json(self, obj: dict, status: int = 200) -> None:
         body = json.dumps(obj).encode()
@@ -795,7 +871,10 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/api/state":
             names = sorted(p.name for p in (self.dataset_dir / "images").iterdir())
-            self._json({"names": names, "decisions": load_decisions(self.decisions_path)})
+            self._json({
+                "names": names, "decisions": load_decisions(self.decisions_path),
+                "flagged": load_flagged(self.flagged_path),
+            })
         elif self.path.startswith("/api/image/"):
             name = unquote(self.path[len("/api/image/"):])
             path = self.dataset_dir / "images" / name
@@ -885,6 +964,12 @@ def main() -> None:
         "--backup-dir", type=Path, default=None,
         help="Cartella di backup dei label originali (default: <dataset_dir>/review_label_backups)",
     )
+    parser.add_argument(
+        "--flagged-path", type=Path, default=config.FLAGGED_COCO_OVERLAP_PATH,
+        help="File con le detection scartate per overlap sosia (annotate_coco_classes.py), segnalate "
+             f"a video quando l'immagine corrente vi compare (default: {config.FLAGGED_COCO_OVERLAP_PATH}; "
+             "ignorato in silenzio se il file non esiste, es. su dataset diversi da union_reviewed_coco)",
+    )
     args = parser.parse_args()
 
     dataset_dir = args.dataset_dir.resolve()
@@ -895,13 +980,18 @@ def main() -> None:
     Handler.decisions_path = (args.decisions_file or dataset_dir / "review_decisions.json").resolve()
     Handler.backup_dir = (args.backup_dir or dataset_dir / "review_label_backups").resolve()
     Handler.phash_cache_path = dataset_dir / "review_phash_cache.json"
+    Handler.flagged_path = args.flagged_path.resolve()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     num_images = sum(1 for _ in (dataset_dir / "images").iterdir())
+    num_flagged = len(load_flagged(Handler.flagged_path))
     print(f"Dataset: {dataset_dir}")
     print(f"Immagini trovate: {num_images}")
     print(f"Decisioni: {Handler.decisions_path}")
     print(f"Backup label: {Handler.backup_dir}")
+    if num_flagged:
+        print(f"Immagini con detection scartate per overlap sosia segnalate a video: {num_flagged} "
+              f"(da {Handler.flagged_path})")
     print(f"Apri http://localhost:{args.port} nel browser (Ctrl+C per fermare)")
     server.serve_forever()
 

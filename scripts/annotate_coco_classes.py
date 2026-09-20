@@ -15,13 +15,16 @@ più di un mancato rilevamento, quindi la soglia effettiva è più
 conservativa del default Ultralytics (0.25).
 
 Una detection di classe "sosia" del monopattino (COCO_ESCOOTER_LOOKALIKE_
-CLASSES: bici, moto, skateboard, snowboard) viene scartata se la sua bbox è
-coperta per più di COCO_ESCOOTER_OVERLAP_THRESHOLD da una bbox escooter
-dell'immagine (frazione di area della detection, non IoU simmetrico — v.
-containment_ratio()/select_coco_boxes()): in quel caso è quasi certamente lo
-stesso oggetto fisico del monopattino, tenuto per intero o in parte (es.
-quando il modello rileva solo il pianale, "skateboard"/"snowboard"), e
-tenerla creerebbe due etichette contraddittorie sulla stessa area. Il
+CLASSES: bici, moto, colonnina/parchimetro, skateboard, snowboard) viene
+scartata se la sua bbox è coperta per più di COCO_ESCOOTER_OVERLAP_THRESHOLD
+dall'unione delle bbox escooter dell'immagine (frazione di area della
+detection, non IoU simmetrico, non containment contro una singola bbox — v.
+union_containment_ratio()/select_coco_boxes()): in quel caso è
+quasi certamente lo stesso oggetto fisico del monopattino, tenuto per
+intero o in parte (es. quando il modello rileva solo il pianale,
+"skateboard"/"snowboard", o solo lo stelo/manubrio, "parking meter" — un
+oggetto verticale sottile scambiato per un altro), e tenerla creerebbe due
+etichette contraddittorie sulla stessa area. Il
 controllo è limitato a quelle classi apposta: esteso a tutte scarterebbe
 anche oggetti reali chiaramente distinti (un'auto, una borsa, una panchina
 sullo sfondo...) che ricadono per intero nella bbox escooter solo per
@@ -214,6 +217,35 @@ def containment_ratio(box_xyxy: tuple, other_xyxy: tuple) -> float:
     return inter / area if area > 0 else 0.0
 
 
+def union_containment_ratio(box_xyxy: tuple, others: list, grid: int = 32) -> float:
+    """Frazione dell'area di box_xyxy coperta dall'UNIONE di others, non dal
+    singolo che la copre di più (containment_ratio prende il massimo su un
+    solo other alla volta). In una fila di monopattini ravvicinati (dock di
+    sharing, parcheggi fitti) una detection sosia può ricadere a cavallo di
+    due bbox escooter adiacenti: contro ciascuna singolarmente la
+    containment resta bassa (l'area si divide fra le due), pur essendo
+    l'intera detection "dentro qualche escooter" — caso osservato in
+    pratica, che containment_ratio da solo non cattura. Calcolata per
+    campionamento su una griglia grid x grid nella bbox (esatta a meno
+    dell'errore di discretizzazione, ~1/grid): sufficiente per una
+    decisione di soglia, evitando la geometria esatta dell'unione di
+    rettangoli per un numero di box comunque piccolo per immagine."""
+    x1, y1, x2, y2 = box_xyxy
+    if x2 <= x1 or y2 <= y1 or not others:
+        return 0.0
+    relevant = [o for o in others if not (o[2] <= x1 or o[0] >= x2 or o[3] <= y1 or o[1] >= y2)]
+    if not relevant:
+        return 0.0
+    hits = 0
+    for i in range(grid):
+        px = x1 + (i + 0.5) * (x2 - x1) / grid
+        for j in range(grid):
+            py = y1 + (j + 0.5) * (y2 - y1) / grid
+            if any(o[0] <= px <= o[2] and o[1] <= py <= o[3] for o in relevant):
+                hits += 1
+    return hits / (grid * grid)
+
+
 def select_coco_boxes(
     detections: list, escooter_boxes: list, conf_threshold: float, overlap_threshold: float,
     implausible_classes: set, rescue: bool = False,
@@ -221,20 +253,25 @@ def select_coco_boxes(
     """Detection [classe, confidence, xyxy] sopra soglia di confidenza,
     scartando:
     - quelle di classe "sosia" del monopattino (COCO_ESCOOTER_LOOKALIKE_
-      CLASSES: bici, moto, skateboard, snowboard) quasi interamente contenute
-      in una bbox escooter — probabile stesso oggetto fisico misclassificato,
-      es. il solo pianale del monopattino letto come "skateboard". Si usa la
-      frazione di area della detection COCO coperta dalla bbox escooter (non
-      l'IoU simmetrico): una detection molto più piccola della bbox escooter
-      che ricade quasi per intero al suo interno è quasi certamente lo
-      stesso oggetto, anche se l'IoU risulterebbe basso per la differenza di
-      area. Il controllo è limitato a quelle classi apposta: esteso a tutte
-      scarterebbe anche oggetti reali chiaramente distinti (es. un'auto o
-      una borsa sullo sfondo) che ricadono per intero nella bbox escooter
-      solo per prospettiva, non perché coincidano fisicamente con essa. Non
-      è comunque un criterio geometrico infallibile (un oggetto sosia reale
-      parcheggiato proprio dietro/accanto al monopattino può avere la stessa
-      containment di un vero doppione), da qui il meccanismo di rescue sotto;
+      CLASSES: bici, moto, colonnina/parchimetro, skateboard, snowboard) quasi
+      interamente contenute in una bbox escooter — probabile stesso oggetto
+      fisico misclassificato, es. il solo pianale del monopattino letto come
+      "skateboard", o lo stelo/manubrio letto come "parking meter". Si usa la
+      frazione di area della detection COCO coperta dall'UNIONE delle bbox
+      escooter dell'immagine (non l'IoU simmetrico, non il containment
+      contro una singola bbox — v. union_containment_ratio()): in una fila
+      di monopattini ravvicinati una detection sosia può ricadere a cavallo
+      di due bbox escooter adiacenti, con containment basso contro ciascuna
+      singolarmente pur essendo quasi interamente coperta da qualche
+      escooter nel complesso — caso osservato in pratica, da cui il calcolo
+      sull'unione invece che sul singolo migliore. Il controllo è limitato a
+      quelle classi apposta: esteso a tutte scarterebbe anche oggetti reali
+      chiaramente distinti (es. un'auto o una borsa sullo sfondo) che
+      ricadono per intero nella bbox escooter solo per prospettiva, non
+      perché coincidano fisicamente con essa. Non è comunque un criterio
+      geometrico infallibile (un oggetto sosia reale parcheggiato proprio
+      dietro/accanto al monopattino può avere la stessa containment di un
+      vero doppione), da qui il meccanismo di rescue sotto;
     - quelle di classe implausibile in una scena esterna (implausible_
       classes, es. "toilet", "couch", "tv": oggetti da interno), a
       prescindere dalla confidenza: un errore di classificazione ad alta
@@ -257,7 +294,7 @@ def select_coco_boxes(
             continue
         box = (x1, y1, x2, y2)
         if cls in COCO_ESCOOTER_LOOKALIKE_CLASSES and escooter_boxes:
-            containment = max(containment_ratio(box, e) for e in escooter_boxes)
+            containment = union_containment_ratio(box, escooter_boxes)
             if containment > overlap_threshold:
                 if not rescue:
                     discarded_overlap.append((cls, conf, box, containment))
@@ -427,8 +464,8 @@ def main():
         if discarded_overlap:
             log_lines.append(f"{name}: {len(discarded_overlap)} detection scartate per overlap con bbox escooter")
             per_image_flagged[name] = (escooter_boxes, discarded_overlap)
-            for cls, conf, _box, containment in discarded_overlap:
-                all_flagged.append((name, cls, conf, containment))
+            for cls, conf, box, containment in discarded_overlap:
+                all_flagged.append((name, cls, conf, containment, to_label_line(cls, box, w_px, h_px)))
         if discarded_implausible:
             log_lines.append(f"{name}: {discarded_implausible} detection scartate per classe implausibile")
 
@@ -466,17 +503,20 @@ def main():
     flagged_path.parent.mkdir(parents=True, exist_ok=True)
     all_flagged.sort(key=lambda f: -f[2])  # confidence decrescente: i casi più "sicuri" del modello prima
     flagged_path.write_text(
-        "# Detection di classe sosia del monopattino (bici/moto/skateboard/snowboard) scartate per overlap\n"
-        "# con una bbox escooter (v. select_coco_boxes in annotate_coco_classes.py): non è un criterio\n"
-        "# geometrico infallibile, un oggetto sosia reale parcheggiato vicino/dietro il monopattino può\n"
-        "# essere scartato per errore. Rivedi visivamente con --export-flagged-sample e aggiungi il nome\n"
+        "# Detection di classe sosia del monopattino (bici/moto/parking meter/skateboard/snowboard)\n"
+        "# scartate per overlap con una bbox escooter (v. select_coco_boxes in annotate_coco_classes.py):\n"
+        "# non è un criterio geometrico infallibile, un oggetto sosia reale parcheggiato vicino/dietro il\n"
+        "# monopattino può essere scartato per errore. Rivedi in review_app.py (la bbox scartata è\n"
+        "# disegnata tratteggiata quando compare qui) o con --export-flagged-sample, e aggiungi il nome\n"
         "# immagine (una riga per immagine, righe vuote o che iniziano per # ignorate) a "
         f"{args.rescue_path}\n"
         f"# per tenere le sue detection sosia al prossimo run (rilancio istantaneo, riusa la cache).\n"
+        f"# Campi: nome immagine, classe, confidence, containment, riga label (classe xc yc w h, come nei\n"
+        f"# file label, per disegnare la bbox scartata).\n"
         f"# {len(all_flagged)} detection segnalate, ordinate per confidenza decrescente.\n\n"
         + "\n".join(
-            f"{name}\t{class_names.get(cls, cls)}\tconf={conf:.2f}\tcontainment={containment:.2f}"
-            for name, cls, conf, containment in all_flagged
+            f"{name}\t{class_names.get(cls, cls)}\tconf={conf:.2f}\tcontainment={containment:.2f}\t{label_line}"
+            for name, cls, conf, containment, label_line in all_flagged
         ) + "\n"
     )
     print(f"Detection scartate per overlap segnalate per revisione in {flagged_path}")

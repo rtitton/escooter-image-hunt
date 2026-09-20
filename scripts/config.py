@@ -46,6 +46,11 @@ UNION_REVIEWED_PHASHDEDUP_DIR = DATA_ROOT / os.environ.get(
 RIDER_CONTAMINATED_DIR = DATA_ROOT / os.environ.get("RIDER_CONTAMINATED_DIRNAME", "processed/rider_contaminated")
 BYDATASET_DIR = DATA_ROOT / os.environ.get("BYDATASET_DIRNAME", "processed/bydataset")
 UNION_REVIEWED_COCO_DIR = DATA_ROOT / os.environ.get("UNION_REVIEWED_COCO_DIRNAME", "processed/union_reviewed_coco")
+# target per union_reviewed_coco dopo la revisione manuale (review_app.py, review_decisions.json
+# nella stessa cartella): solo le immagini "select", prodotto da materialize_union_reviewed.py
+UNION_REVIEWED_COCO_FINAL_DIR = DATA_ROOT / os.environ.get(
+    "UNION_REVIEWED_COCO_FINAL_DIRNAME", "processed/union_reviewed_coco_final"
+)
 COCO_ANNOTATION_CACHE_PATH = DATA_ROOT / os.environ.get(
     "COCO_ANNOTATION_CACHE_FILENAME", "cache/coco_annotation_cache.json"
 )
@@ -96,12 +101,12 @@ COCO_ANNOTATION_CONF_THRESHOLD = _env_float("COCO_ANNOTATION_CONF_THRESHOLD", 0.
 # anche i casi in cui la detection COCO è molto più piccola della bbox escooter
 COCO_ESCOOTER_OVERLAP_THRESHOLD = _env_float("COCO_ESCOOTER_OVERLAP_THRESHOLD", 0.6)
 # classi COCO plausibili come misclassificazione dell'intero monopattino o di una sua parte (bici,
-# moto, skateboard, snowboard): solo queste sono soggette allo scarto per overlap sopra. Applicarlo
-# a tutte le classi scarterebbe anche oggetti reali chiaramente distinti (es. un'auto o una borsa)
-# che ricadono per intero nella bbox escooter solo per prospettiva/profondità, non perché coincidano
-# fisicamente con essa (v. PIPELINE.md sezione 9)
+# moto, skateboard, snowboard, o lo stelo/manubrio letto come colonnina/parchimetro): solo queste
+# sono soggette allo scarto per overlap sopra. Applicarlo a tutte le classi scarterebbe anche oggetti
+# reali chiaramente distinti (es. un'auto o una borsa) che ricadono per intero nella bbox escooter
+# solo per prospettiva/profondità, non perché coincidano fisicamente con essa (v. PIPELINE.md sezione 9)
 COCO_ESCOOTER_LOOKALIKE_CLASSES = {
-    int(v) for v in os.environ.get("COCO_ESCOOTER_LOOKALIKE_CLASSES", "1,3,31,36").split(",")
+    int(v) for v in os.environ.get("COCO_ESCOOTER_LOOKALIKE_CLASSES", "1,3,12,31,36").split(",")
 }
 # classi COCO implausibili in una scena esterna (marciapiede/strada) come quelle del dataset:
 # oggetti da interno (elettrodomestici, arredo da cucina/bagno) che se rilevati sono quasi certamente
