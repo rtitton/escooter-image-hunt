@@ -64,6 +64,10 @@ COCO_OVERLAP_RESCUE_PATH = DATA_ROOT / os.environ.get(
     "COCO_OVERLAP_RESCUE_FILENAME", "coco_overlap_rescue.txt"
 )
 
+# --- Test set da video (extract_video_frames.py) ---
+VIDEO_TESTSET_DIR = DATA_ROOT / os.environ.get("VIDEO_TESTSET_DIRNAME", "processed/video_testset")
+VIDEO_TESTSET_FPS = _env_float("VIDEO_TESTSET_FPS", 2.0)  # frame estratti per secondo di video
+
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
 PERSON_CLASS_ID = _env_int("PERSON_CLASS_ID", 0)  # classe "person" in COCO
