@@ -68,6 +68,11 @@ COCO_OVERLAP_RESCUE_PATH = DATA_ROOT / os.environ.get(
 VIDEO_TESTSET_DIR = DATA_ROOT / os.environ.get("VIDEO_TESTSET_DIRNAME", "processed/video_testset")
 VIDEO_TESTSET_FPS = _env_float("VIDEO_TESTSET_FPS", 2.0)  # frame estratti per secondo di video
 
+# --- Valutazione su test set esterni (eval_testset.py) ---
+# cartella che raccoglie, per ogni test set valutato, la copia con label rimappati a singola
+# classe (0) e il data.yaml richiesto da Ultralytics per la validazione
+EVAL_WORKDIR = DATA_ROOT / os.environ.get("EVAL_WORKDIR_DIRNAME", "tmp/eval")
+
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
 PERSON_CLASS_ID = _env_int("PERSON_CLASS_ID", 0)  # classe "person" in COCO
@@ -139,3 +144,6 @@ COCO_FLAGGED_BOX_COLOR = tuple(int(v) for v in os.environ.get("COCO_FLAGGED_BOX_
 
 # --- App di revisione (review_app.py) ---
 REVIEW_APP_PORT = _env_int("REVIEW_APP_PORT", 8765)
+
+# --- App di revisione manuale dello split train/valid (split_review_app.py) ---
+SPLIT_REVIEW_APP_PORT = _env_int("SPLIT_REVIEW_APP_PORT", 8767)

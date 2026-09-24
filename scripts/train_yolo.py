@@ -121,7 +121,7 @@ def main():
     parser.add_argument("--data", type=Path, required=True, help="data.yaml del dataset (es. train/valid di split_dataset.py)")
     parser.add_argument("--model", default="yolo11l.pt", help="Modello pretrained Ultralytics di partenza (default: yolo11l.pt)")
     parser.add_argument("--epochs", type=int, default=100, help="Numero di epoche (default: 100)")
-    parser.add_argument("--batch", type=int, default=16, help="Dimensione batch (default: 16)")
+    parser.add_argument("--batch", type=int, default=-1, help="Dimensione batch (default: -1)")
     parser.add_argument("--freeze", type=int, default=None,
                          help="Congela i primi N layer del modello pretrained (default: nessun freeze)")
     parser.add_argument("--imgsz", type=int, default=640, help="Dimensione immagine di training (default: 640)")
