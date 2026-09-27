@@ -14,19 +14,27 @@ split (le foto sono spesso duplicate o quasi-duplicate fra dataset
 Roboflow diversi, v. dedupe_phash.py — un quasi-duplicato finito per caso
 uno in train e uno in valid gonfia le metriche di validazione). Due modalità:
 
-  - "Coppie sospette": per ogni immagine di valid, la sua più vicina in
-    train per pHash (distanza di Hamming), ordinate dalla più sospetta.
-    Bottone per spostare l'una o l'altra, o per ignorare la coppia (non
-    è un duplicato) così non ricompare.
+  - "Coppie sospette": per ogni immagine di valid, tutte le immagini di
+    train entro la soglia di distanza pHash (Hamming), raggruppate in una
+    riga e ordinate dalla più sospetta: un cluster di copie si risolve in
+    una passata. Bottoni per spostare o escludere ciascuna, o per ignorare
+    la coppia (non è un duplicato) così non ricompare.
   - "Sfoglia": le due cartelle affiancate, poche miniature alla volta
     (default 4 per lato, configurabile), filtrabili per dataset sorgente
     (prefisso "<dataset_id>__" nel nome file) — per una scorsa manuale
     mirata, non esaustiva, quando si vuole ribilanciare a occhio.
 
-Non disegna le bbox sulle miniature (a differenza di review_app.py): qui
-l'obiettivo è decidere la collocazione train/valid, non correggere le
-annotazioni. Sotto ogni miniatura c'è comunque il conteggio delle bbox
-escooter.
+Su ogni miniatura sono disegnate le bbox (escooter in rosso, person in
+verde, altre classi COCO in blu).
+
+Azioni per immagine (nelle coppie sospette e in Sfoglia):
+  - sposta: passa dall'altro split (immagine + label);
+  - escludi: sposta immagine + label in <dataset_dir>/excluded/<split>/,
+    fuori dal dataset ma senza cancellarle. Sui veri duplicati è la mossa più
+    pulita (eliminando la copia in train non si crea nessun duplicato
+    interno né a train né a valid);
+  - "Annulla ultima azione": ripristina l'ultimo spostamento o l'ultima
+    esclusione registrata nel log.
 
 Avvio:
     python3 scripts/split_review_app.py <dataset_dir> [--port 8767]
@@ -60,17 +68,18 @@ def list_images(split_dir: Path) -> list:
     return sorted(p.name for p in (split_dir / "images").iterdir()) if (split_dir / "images").is_dir() else []
 
 
-def n_escooter_boxes(split_dir: Path, name: str) -> int:
-    lbl_path = split_dir / "labels" / f"{Path(name).stem}.txt"
-    return sum(1 for cls, *_ in read_boxes_file(lbl_path) if cls == ESCOOTER_CLASS_ID)
+def boxes_of(split_dir: Path, name: str) -> list:
+    """Tutte le bbox (classe, xc, yc, w, h) del label di un'immagine, per disegnarle."""
+    return read_boxes_file(split_dir / "labels" / f"{Path(name).stem}.txt")
 
 
-def move_image(dataset_dir: Path, name: str, from_split: str) -> None:
-    to_split = other_split(from_split)
-    src_dir, dst_dir = dataset_dir / from_split, dataset_dir / to_split
+def move_files(src_dir: Path, dst_dir: Path, name: str) -> None:
+    """Sposta immagine e label (se manca, ne crea uno vuoto a destinazione)
+    da src_dir a dst_dir, entrambe cartelle con sottocartelle images/ e
+    labels/. Rifiuta di sovrascrivere un'immagine già presente."""
     dst_img = dst_dir / "images" / name
     if dst_img.exists():
-        raise FileExistsError(f"{name} è già presente in {to_split}")
+        raise FileExistsError(f"{name} è già presente in {dst_dir}")
     (dst_dir / "images").mkdir(parents=True, exist_ok=True)
     (dst_dir / "labels").mkdir(parents=True, exist_ok=True)
     shutil.move(str(src_dir / "images" / name), str(dst_img))
@@ -82,27 +91,44 @@ def move_image(dataset_dir: Path, name: str, from_split: str) -> None:
         lbl_dst.write_text("")
 
 
+def excluded_dir(dataset_dir: Path, split: str) -> Path:
+    return dataset_dir / "excluded" / split
+
+
+def count_excluded(dataset_dir: Path) -> int:
+    return sum(len(list_images(excluded_dir(dataset_dir, s))) for s in SPLITS)
+
+
 def hex_to_int(h: str) -> int:
     return int(h, 16)
 
 
-def nearest_cross_split_pairs(train_phash: dict, valid_phash: dict, dismissed: set) -> list:
-    """Per ogni immagine di valid, la più vicina in train per distanza di
-    Hamming del pHash, ordinate dalla più sospetta (distanza minima). Le
-    coppie in `dismissed` (chiave "valid|train") vengono escluse."""
+MAX_MATCHES_PER_GROUP = 12  # oltre, la riga mostra "+N altre" per non allungare la pagina
+
+
+def cross_split_groups(train_phash: dict, valid_phash: dict, dismissed: set, threshold: float) -> list:
+    """Per ogni immagine di valid, le immagini di train con distanza di
+    Hamming del pHash <= threshold (le più vicine per prime, al massimo
+    MAX_MATCHES_PER_GROUP; il resto in "extra"). Le coppie in `dismissed`
+    (chiave "valid|train") vengono saltate. I gruppi sono ordinati dal più
+    sospetto (distanza minima) e omessi se non hanno nessun match."""
     train_items = [(name, hex_to_int(h)) for name, h in train_phash.items()]
-    pairs = []
+    groups = []
     for vname, vhash in valid_phash.items():
         vhi = hex_to_int(vhash)
-        best_name, best_dist = None, 65  # 65 > distanza massima possibile (64 bit)
+        matches = []
         for tname, thi in train_items:
             d = (vhi ^ thi).bit_count()
-            if d < best_dist:
-                best_dist, best_name = d, tname
-        if best_name is not None and f"{vname}|{best_name}" not in dismissed:
-            pairs.append({"valid": vname, "train": best_name, "distance": best_dist})
-    pairs.sort(key=lambda p: p["distance"])
-    return pairs
+            if d <= threshold and f"{vname}|{tname}" not in dismissed:
+                matches.append({"train": tname, "distance": d})
+        if matches:
+            matches.sort(key=lambda m: m["distance"])
+            groups.append({
+                "valid": vname, "matches": matches[:MAX_MATCHES_PER_GROUP],
+                "extra": max(0, len(matches) - MAX_MATCHES_PER_GROUP),
+            })
+    groups.sort(key=lambda g: g["matches"][0]["distance"])
+    return groups
 
 
 PAGE = """<!doctype html>
@@ -116,10 +142,12 @@ PAGE = """<!doctype html>
   body { margin: 0; background: #111; color: #eee; font-family: system-ui, sans-serif; font-size: 14px; }
   #bar { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #1b1b1b; border-bottom: 1px solid #333; flex-wrap: wrap; gap: 12px; }
   #bar .counts span { margin-right: 16px; color: #ccc; }
-  #tabs { display: flex; gap: 6px; }
+  #tabs { display: flex; gap: 6px; align-items: center; }
   #tabs button { background: #222; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 6px 14px; cursor: pointer; }
   #tabs button.active { background: #2d5a2d; color: #fff; border-color: #3a7a3a; }
   #tabs button:hover { background: #333; }
+  #tabs button#undo { margin-left: 16px; background: #4a3a20; border-color: #7a6030; color: #fff; }
+  #tabs button#undo:hover { background: #5a4828; }
   main { padding: 16px; }
   .hidden { display: none !important; }
   select, input[type=number] { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; }
@@ -127,34 +155,45 @@ PAGE = """<!doctype html>
   button.small:hover { background: #444; }
   button.move { background: #2d4d5a; border-color: #3a7a9a; }
   button.move:hover { background: #37627a; }
-  button.dismiss { background: #4a3030; border-color: #7a4040; }
-  button.dismiss:hover { background: #5a3838; }
+  button.exclude { background: #5a2d2d; border-color: #9a3a3a; }
+  button.exclude:hover { background: #7a3737; }
+  button.dismiss { background: #333; border-color: #666; }
+
+  .imgwrap { position: relative; background: #000; border-radius: 4px; overflow: hidden; }
+  .imgwrap img { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; }
+  .imgwrap canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
 
   #browse { display: flex; gap: 20px; }
   .col { flex: 1; min-width: 0; }
   .col h2 { font-size: 15px; margin: 0 0 8px; color: #9c9; }
   .col.valid h2 { color: #9bc; }
   .colbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
   .card { background: #1b1b1b; border: 1px solid #333; border-radius: 6px; padding: 6px; }
-  .card img { width: 100%; aspect-ratio: 4/3; object-fit: contain; background: #000; border-radius: 4px; display: block; }
+  .card .imgwrap { width: 100%; aspect-ratio: 4/3; }
   .card .meta { font-size: 11px; color: #999; margin: 4px 0; word-break: break-all; }
   .card .meta b { color: #ccc; }
-  .card button { width: 100%; margin-top: 4px; }
+  .card .btns { display: flex; gap: 4px; margin-top: 4px; }
+  .card .btns button { flex: 1; }
   .pageinfo { color: #999; font-size: 12px; }
 
   #pairs table { width: 100%; border-collapse: collapse; }
   #pairs th { text-align: left; color: #999; font-weight: normal; font-size: 12px; padding: 6px; border-bottom: 1px solid #333; }
-  #pairs td { padding: 8px 6px; border-bottom: 1px solid #262626; vertical-align: middle; }
-  #pairs img { width: 110px; height: 82px; object-fit: contain; background: #000; border-radius: 4px; display: block; }
-  #pairs .imgcell { display: flex; gap: 8px; align-items: center; }
-  #pairs .distance { font-size: 18px; font-weight: bold; }
-  #pairs .distance.low { color: #e66; }
-  #pairs .distance.mid { color: #ea4; }
-  #pairs .distance.high { color: #6a6; }
-  #pairs .name { font-size: 11px; color: #999; max-width: 160px; word-break: break-all; }
-  #pairs .actions { display: flex; flex-direction: column; gap: 4px; }
+  #pairs td { padding: 12px 6px; border-bottom: 1px solid #333; vertical-align: top; }
+  #pairs .imgwrap { width: 220px; height: 165px; }
+  #pairs .name { font-size: 11px; color: #999; width: 220px; word-break: break-all; margin: 4px 0; }
+  #pairs .vcell { width: 236px; }
+  #pairs .matches { display: flex; flex-wrap: wrap; gap: 14px; }
+  #pairs .match { width: 220px; }
+  #pairs .match .dist { font-size: 16px; font-weight: bold; margin-bottom: 3px; }
+  #pairs .dist.low { color: #e66; }
+  #pairs .dist.mid { color: #ea4; }
+  #pairs .dist.high { color: #6a6; }
+  #pairs .actions { display: flex; flex-direction: column; gap: 4px; width: 220px; }
+  #pairs .extra { color: #999; align-self: center; }
   #topbar-pairs { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  #legend { color: #999; font-size: 12px; }
+  #legend i { display: inline-block; width: 10px; height: 10px; margin: 0 3px 0 10px; vertical-align: middle; }
 </style>
 </head>
 <body>
@@ -162,11 +201,13 @@ PAGE = """<!doctype html>
   <div class="counts">
     <span>train: <b id="c-train">-</b></span>
     <span>valid: <b id="c-valid">-</b></span>
-    <span>spostamenti in questa sessione: <b id="c-moves">0</b></span>
+    <span>esclusi: <b id="c-excluded">-</b></span>
+    <span>azioni in questa sessione: <b id="c-moves">0</b></span>
   </div>
   <div id="tabs">
     <button id="tab-pairs" class="active">Coppie sospette</button>
     <button id="tab-browse">Sfoglia</button>
+    <button id="undo" title="Ripristina l'ultimo spostamento o l'ultima esclusione">Annulla ultima azione</button>
   </div>
 </div>
 
@@ -176,9 +217,10 @@ PAGE = """<!doctype html>
       <label>soglia distanza pHash &le; <input type="number" id="pairs-threshold" value="15" min="0" max="64" style="width:55px"></label>
       <button class="small" id="pairs-reload">Ricalcola</button>
       <span class="pageinfo" id="pairs-count"></span>
+      <span id="legend"><i style="background:#ff3b3b"></i>escooter<i style="background:#3fd23f"></i>person<i style="background:#3b9bff"></i>altre classi</span>
     </div>
     <table>
-      <thead><tr><th>distanza</th><th>valid</th><th>train</th><th>azioni</th></tr></thead>
+      <thead><tr><th>valid</th><th>candidati duplicati in train (dal più vicino)</th></tr></thead>
       <tbody id="pairs-body"></tbody>
     </table>
   </section>
@@ -210,111 +252,166 @@ PAGE = """<!doctype html>
 </main>
 
 <script>
-const state = { browseOffset: { train: 0, valid: 0 }, moves: 0 };
+const ESCOOTER_CLASS = __ESCOOTER_CLASS_ID__;
+const state = { browseOffset: { train: 0, valid: 0 }, actions: 0 };
+
+function ea(s) { return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+function boxColor(cls) { return cls === ESCOOTER_CLASS ? "#ff3b3b" : cls === 0 ? "#3fd23f" : "#3b9bff"; }
+
+function drawBoxes(img) {
+  const wrap = img.parentElement, cv = wrap.querySelector("canvas");
+  const cw = wrap.clientWidth, ch = wrap.clientHeight;
+  cv.width = cw; cv.height = ch;
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || !nh) return;
+  const sc = Math.min(cw / nw, ch / nh), dw = nw * sc, dh = nh * sc;
+  const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+  const boxes = JSON.parse(decodeURIComponent(img.dataset.boxes));
+  boxes.sort((a, b) => (a[0] === ESCOOTER_CLASS) - (b[0] === ESCOOTER_CLASS));  // escooter per ultime, sopra le altre
+  const ctx = cv.getContext("2d");
+  for (const [cls, xc, yc, w, h] of boxes) {
+    ctx.strokeStyle = boxColor(cls);
+    ctx.lineWidth = cls === ESCOOTER_CLASS ? 3 : 1.5;
+    ctx.strokeRect(ox + (xc - w / 2) * dw, oy + (yc - h / 2) * dh, w * dw, h * dh);
+  }
+}
+window.addEventListener("resize", () => document.querySelectorAll("img[data-boxes]").forEach(drawBoxes));
+
+function thumb(split, name, boxes) {
+  return `<div class="imgwrap"><img src="/api/image/${split}/${encodeURIComponent(name)}"
+    data-boxes="${encodeURIComponent(JSON.stringify(boxes))}" onload="drawBoxes(this)"><canvas></canvas></div>`;
+}
 
 async function refreshCounts() {
-  const r = await fetch("/api/state"); const s = await r.json();
+  const s = await (await fetch("/api/state")).json();
   document.getElementById("c-train").textContent = s.train_count;
   document.getElementById("c-valid").textContent = s.valid_count;
+  document.getElementById("c-excluded").textContent = s.excluded_count;
   for (const split of ["train", "valid"]) {
     const sel = document.getElementById(split + "-dataset");
     const current = sel.value;
     sel.innerHTML = '<option value="">tutti i dataset</option>' +
-      s.datasets[split].map(d => `<option value="${d}">${d}</option>`).join("");
+      s.datasets[split].map(d => `<option value="${ea(d)}">${d}</option>`).join("");
     if (s.datasets[split].includes(current)) sel.value = current;
   }
 }
 
 function distClass(d) { return d <= 12 ? "low" : d <= 20 ? "mid" : "high"; }
+function nEsc(boxes) { return boxes.filter(b => b[0] === ESCOOTER_CLASS).length; }
 
 async function loadPairs() {
   const th = document.getElementById("pairs-threshold").value;
-  const r = await fetch(`/api/pairs?threshold=${th}`);
-  const data = await r.json();
-  document.getElementById("pairs-count").textContent = `${data.pairs.length} coppie sotto soglia`;
-  const body = document.getElementById("pairs-body");
-  body.innerHTML = data.pairs.map(p => `
+  const data = await (await fetch(`/api/groups?threshold=${th}`)).json();
+  const nPairs = data.groups.reduce((n, g) => n + g.matches.length + g.extra, 0);
+  document.getElementById("pairs-count").textContent = `${data.groups.length} immagini di valid con candidati, ${nPairs} coppie`;
+  document.getElementById("pairs-body").innerHTML = data.groups.map(g => `
     <tr>
-      <td><span class="distance ${distClass(p.distance)}">${p.distance}</span></td>
-      <td><div class="imgcell">
-        <img src="/api/image/valid/${encodeURIComponent(p.valid)}">
-        <div class="name">${p.valid}<br>${p.valid_boxes} bbox escooter</div>
-      </div></td>
-      <td><div class="imgcell">
-        <img src="/api/image/train/${encodeURIComponent(p.train)}">
-        <div class="name">${p.train}<br>${p.train_boxes} bbox escooter</div>
-      </div></td>
-      <td><div class="actions">
-        <button class="small move" onclick="movePair('${esc(p.valid)}','valid')">sposta valid &rarr; train</button>
-        <button class="small move" onclick="movePair('${esc(p.train)}','train')">sposta train &rarr; valid</button>
-        <button class="small dismiss" onclick="dismissPair('${esc(p.valid)}','${esc(p.train)}')">non è un duplicato</button>
+      <td class="vcell">
+        ${thumb("valid", g.valid, g.valid_boxes)}
+        <div class="name">${g.valid}<br>${nEsc(g.valid_boxes)} bbox escooter</div>
+        <div class="actions">
+          <button class="small exclude" data-act="exclude" data-split="valid" data-name="${ea(g.valid)}">escludi da valid</button>
+          <button class="small move" data-act="move" data-split="valid" data-name="${ea(g.valid)}">sposta valid &rarr; train</button>
+          <button class="small dismiss" data-act="dismiss" data-valid="${ea(g.valid)}"
+            data-trains="${ea(JSON.stringify(g.matches.map(m => m.train)))}">nessuno è un duplicato</button>
+        </div>
+      </td>
+      <td><div class="matches">
+        ${g.matches.map(m => `
+          <div class="match">
+            <div class="dist ${distClass(m.distance)}">distanza ${m.distance}</div>
+            ${thumb("train", m.train, m.boxes)}
+            <div class="name">${m.train}<br>${nEsc(m.boxes)} bbox escooter</div>
+            <div class="actions">
+              <button class="small exclude" data-act="exclude" data-split="train" data-name="${ea(m.train)}">escludi da train</button>
+              <button class="small move" data-act="move" data-split="train" data-name="${ea(m.train)}">sposta train &rarr; valid</button>
+              <button class="small dismiss" data-act="dismiss" data-valid="${ea(g.valid)}" data-train="${ea(m.train)}">non è un duplicato</button>
+            </div>
+          </div>`).join("")}
+        ${g.extra ? `<div class="extra">+${g.extra} altre sotto soglia</div>` : ""}
       </div></td>
     </tr>`).join("");
-}
-function esc(s) { return s.replace(/'/g, "\\\\'"); }
-
-async function movePair(name, fromSplit) {
-  await fetch("/api/move", { method: "POST", body: JSON.stringify({ name, from_split: fromSplit }) });
-  state.moves++; document.getElementById("c-moves").textContent = state.moves;
-  await refreshCounts(); await loadPairs(); await loadBrowse("train"); await loadBrowse("valid");
-}
-async function dismissPair(vname, tname) {
-  await fetch("/api/dismiss-pair", { method: "POST", body: JSON.stringify({ valid: vname, train: tname }) });
-  await loadPairs();
 }
 
 async function loadBrowse(split) {
   const ds = document.getElementById(split + "-dataset").value;
   const limit = parseInt(document.getElementById(split + "-pagesize").value) || 4;
   const offset = state.browseOffset[split];
-  const r = await fetch(`/api/list?split=${split}&dataset=${encodeURIComponent(ds)}&offset=${offset}&limit=${limit}`);
-  const data = await r.json();
+  const data = await (await fetch(`/api/list?split=${split}&dataset=${encodeURIComponent(ds)}&offset=${offset}&limit=${limit}`)).json();
   document.getElementById(split + "-pageinfo").textContent =
     data.total ? `${offset + 1}-${Math.min(offset + limit, data.total)} di ${data.total}` : "0 immagini";
-  const grid = document.getElementById(split + "-grid");
   const arrow = split === "train" ? "&rarr; valid" : "&larr; train";
-  grid.innerHTML = data.items.map(it => `
-    <div class="card">
-      <img src="/api/image/${split}/${encodeURIComponent(it.name)}">
-      <div class="meta"><b>${it.dataset}</b><br>${it.name}<br>${it.n_boxes} bbox escooter</div>
-      <button class="small move" onclick="moveBrowse('${esc(it.name)}','${split}')">${arrow}</button>
+  document.getElementById(split + "-grid").innerHTML = data.items.map(it => `
+    <div class="card">${thumb(split, it.name, it.boxes)}
+      <div class="meta"><b>${it.dataset}</b><br>${it.name}<br>${it.boxes.filter(b => b[0] === ESCOOTER_CLASS).length} bbox escooter</div>
+      <div class="btns">
+        <button class="small move" data-act="move" data-split="${split}" data-name="${ea(it.name)}">sposta ${arrow}</button>
+        <button class="small exclude" data-act="exclude" data-split="${split}" data-name="${ea(it.name)}">escludi</button>
+      </div>
     </div>`).join("");
 }
-async function moveBrowse(name, fromSplit) {
-  await fetch("/api/move", { method: "POST", body: JSON.stringify({ name, from_split: fromSplit }) });
-  state.moves++; document.getElementById("c-moves").textContent = state.moves;
-  await refreshCounts(); await loadBrowse("train"); await loadBrowse("valid");
+
+async function refreshAll() {
+  await refreshCounts();
+  await loadPairs();
+  await loadBrowse("train");
+  await loadBrowse("valid");
 }
 
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", body: JSON.stringify(body || {}) });
+  return r.json();
+}
+
+document.addEventListener("click", async e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const act = b.dataset.act;
+  if (act === "dismiss") {
+    await post("/api/dismiss-pair", {
+      valid: b.dataset.valid,
+      ...(b.dataset.trains ? { trains: JSON.parse(b.dataset.trains) } : { train: b.dataset.train }),
+    });
+    await loadPairs();
+    return;
+  }
+  const res = await post("/api/" + act, { name: b.dataset.name, from_split: b.dataset.split });
+  if (!res.ok) { alert(res.error || "operazione fallita"); return; }
+  state.actions++; document.getElementById("c-moves").textContent = state.actions;
+  await refreshAll();
+});
+
+document.getElementById("undo").onclick = async () => {
+  const res = await post("/api/undo");
+  if (!res.ok) { alert(res.error || "niente da annullare"); return; }
+  state.actions = Math.max(0, state.actions - 1); document.getElementById("c-moves").textContent = state.actions;
+  await refreshAll();
+};
+
 for (const split of ["train", "valid"]) {
+  const pageSize = () => parseInt(document.getElementById(split + "-pagesize").value) || 4;
   document.getElementById(split + "-prev").onclick = () => {
-    const limit = parseInt(document.getElementById(split + "-pagesize").value) || 4;
-    state.browseOffset[split] = Math.max(0, state.browseOffset[split] - limit);
+    state.browseOffset[split] = Math.max(0, state.browseOffset[split] - pageSize());
     loadBrowse(split);
   };
   document.getElementById(split + "-next").onclick = () => {
-    const limit = parseInt(document.getElementById(split + "-pagesize").value) || 4;
-    state.browseOffset[split] += limit;
+    state.browseOffset[split] += pageSize();
     loadBrowse(split);
   };
-  document.getElementById(split + "-dataset").addEventListener("change", () => { state.browseOffset[split] = 0; loadBrowse(split); });
-  document.getElementById(split + "-pagesize").addEventListener("change", () => { state.browseOffset[split] = 0; loadBrowse(split); });
+  for (const id of ["-dataset", "-pagesize"])
+    document.getElementById(split + id).addEventListener("change", () => { state.browseOffset[split] = 0; loadBrowse(split); });
 }
 document.getElementById("pairs-reload").onclick = loadPairs;
 
-document.getElementById("tab-pairs").onclick = () => {
-  document.getElementById("tab-pairs").classList.add("active");
-  document.getElementById("tab-browse").classList.remove("active");
-  document.getElementById("pairs").classList.remove("hidden");
-  document.getElementById("browse").classList.add("hidden");
-};
-document.getElementById("tab-browse").onclick = () => {
-  document.getElementById("tab-browse").classList.add("active");
-  document.getElementById("tab-pairs").classList.remove("active");
-  document.getElementById("browse").classList.remove("hidden");
-  document.getElementById("pairs").classList.add("hidden");
-  loadBrowse("train"); loadBrowse("valid");
-};
+function showTab(name) {
+  document.getElementById("tab-pairs").classList.toggle("active", name === "pairs");
+  document.getElementById("tab-browse").classList.toggle("active", name === "browse");
+  document.getElementById("pairs").classList.toggle("hidden", name !== "pairs");
+  document.getElementById("browse").classList.toggle("hidden", name !== "browse");
+  if (name === "browse") { loadBrowse("train"); loadBrowse("valid"); } else loadPairs();  // ridisegna le bbox: a tab nascosto i canvas hanno dimensione 0
+}
+document.getElementById("tab-pairs").onclick = () => showTab("pairs");
+document.getElementById("tab-browse").onclick = () => showTab("browse");
 
 refreshCounts().then(loadPairs);
 </script>
@@ -346,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(parsed.query)
 
         if parsed.path in ("/", "/index.html"):
-            body = PAGE.encode("utf-8")
+            body = PAGE.replace("__ESCOOTER_CLASS_ID__", str(ESCOOTER_CLASS_ID)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -358,6 +455,7 @@ class Handler(BaseHTTPRequestHandler):
             valid_names = list_images(self.dataset_dir / "valid")
             self._json({
                 "train_count": len(train_names), "valid_count": len(valid_names),
+                "excluded_count": count_excluded(self.dataset_dir),
                 "datasets": {
                     "train": sorted(set(dataset_of(n) for n in train_names)),
                     "valid": sorted(set(dataset_of(n) for n in valid_names)),
@@ -377,7 +475,7 @@ class Handler(BaseHTTPRequestHandler):
             if ds_filter:
                 names = [n for n in names if dataset_of(n) == ds_filter]
             page = names[offset:offset + limit]
-            items = [{"name": n, "dataset": dataset_of(n), "n_boxes": n_escooter_boxes(split_dir, n)} for n in page]
+            items = [{"name": n, "dataset": dataset_of(n), "boxes": boxes_of(split_dir, n)} for n in page]
             self._json({"items": items, "total": len(names)})
 
         elif parsed.path.startswith("/api/image/"):
@@ -398,16 +496,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
 
-        elif parsed.path == "/api/pairs":
-            threshold = float(qs.get("threshold", ["20"])[0])
+        elif parsed.path == "/api/groups":
+            threshold = float(qs.get("threshold", ["15"])[0])
             dismissed = set(load_decisions(self.dismissed_path).keys())
-            train_phash, valid_phash = self._phashes("train"), self._phashes("valid")
-            all_pairs = nearest_cross_split_pairs(train_phash, valid_phash, dismissed)
-            pairs = [p for p in all_pairs if p["distance"] <= threshold]
-            for p in pairs:
-                p["valid_boxes"] = n_escooter_boxes(self.dataset_dir / "valid", p["valid"])
-                p["train_boxes"] = n_escooter_boxes(self.dataset_dir / "train", p["train"])
-            self._json({"pairs": pairs})
+            groups = cross_split_groups(self._phashes("train"), self._phashes("valid"), dismissed, threshold)
+            for g in groups:
+                g["valid_boxes"] = boxes_of(self.dataset_dir / "valid", g["valid"])
+                for m in g["matches"]:
+                    m["boxes"] = boxes_of(self.dataset_dir / "train", m["train"])
+            self._json({"groups": groups})
 
         else:
             self.send_error(404)
@@ -416,27 +513,43 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
 
-        if self.path == "/api/move":
+        if self.path in ("/api/move", "/api/exclude"):
             name, from_split = body["name"], body["from_split"]
             if from_split not in SPLITS:
                 self._json({"ok": False, "error": "from_split non valido"}, 400)
                 return
+            action = self.path.rsplit("/", 1)[1]
+            dst = self.dataset_dir / other_split(from_split) if action == "move" else excluded_dir(self.dataset_dir, from_split)
             try:
-                move_image(self.dataset_dir, name, from_split)
+                move_files(self.dataset_dir / from_split, dst, name)
             except (FileNotFoundError, FileExistsError) as e:
                 self._json({"ok": False, "error": str(e)}, 400)
                 return
             log = load_decisions(self.move_log_path)
-            log.setdefault("moves", []).append(
-                {"name": name, "from": from_split, "to": other_split(from_split), "ts": time.time()}
-            )
+            log.setdefault("moves", []).append({"action": action, "name": name, "from": from_split, "ts": time.time()})
             save_decisions(self.move_log_path, log)
-            self._json({"ok": True, "to_split": other_split(from_split)})
+            self._json({"ok": True})
+
+        elif self.path == "/api/undo":
+            log = load_decisions(self.move_log_path)
+            if not log.get("moves"):
+                self._json({"ok": False, "error": "niente da annullare"})
+                return
+            last = log["moves"][-1]
+            src = self.dataset_dir / other_split(last["from"]) if last.get("action", "move") == "move"                 else excluded_dir(self.dataset_dir, last["from"])
+            try:
+                move_files(src, self.dataset_dir / last["from"], last["name"])
+            except (FileNotFoundError, FileExistsError) as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+                return
+            log["moves"].pop()
+            save_decisions(self.move_log_path, log)
+            self._json({"ok": True, "restored": last["name"], "to_split": last["from"]})
 
         elif self.path == "/api/dismiss-pair":
-            key = f"{body['valid']}|{body['train']}"
             dismissed = load_decisions(self.dismissed_path)
-            dismissed[key] = True
+            for train_name in body.get("trains") or [body["train"]]:
+                dismissed[f"{body['valid']}|{train_name}"] = True
             save_decisions(self.dismissed_path, dismissed)
             self._json({"ok": True})
 
