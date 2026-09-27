@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Valida uno o più pesi YOLO monoclasse (classe 80, escooter, rimappata a 0
-in training da --classes) su uno o più test set esterni, ciascuno una
+"""Valida uno o più pesi YOLO su uno o più test set esterni, ciascuno una
 cartella con sottocartelle images/ e labels/ (label in classe 80, come
 prodotti da review_app.py + materialize_union_reviewed.py).
+
+Di default i pesi sono monoclasse (escooter rimappata a 0 in training da
+--classes). Per un modello multiclasse (es. addestrato su un dataset esterno
+con classi person/scooter) si indica con --class-index l'indice della classe
+monopattino: i label del test set vengono rimappati su quell'indice e le
+metriche riguardano solo quella classe (le altre non hanno label nel test set).
 
 Per ogni test set costruisce in EVAL_WORKDIR (config.py) una copia di
 lavoro con i label rimappati 80 -> 0 (le immagini sono linkate, non
@@ -85,7 +90,7 @@ def iou_matrix(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def size_breakdown(model: YOLO, images_dir: Path, labels_dir: Path, imgsz: int, device: str,
-                    conf: float, iou_thr: float) -> dict:
+                    conf: float, iou_thr: float, cls: int = 0) -> dict:
     """Recall per taglia dei box reali (small/medium/large) e conteggio dei
     falsi positivi per taglia della bbox predetta, con matching IoU greedy
     (predizioni in ordine di confidenza decrescente). V. docstring del
@@ -96,7 +101,8 @@ def size_breakdown(model: YOLO, images_dir: Path, labels_dir: Path, imgsz: int, 
     fp_counts = {name: 0 for name, _, _ in SIZE_BUCKETS}
     for i in range(0, len(images), 16):
         batch = images[i:i + 16]
-        results = model.predict([str(p) for p in batch], conf=conf, imgsz=imgsz, device=device, verbose=False)
+        results = model.predict([str(p) for p in batch], conf=conf, imgsz=imgsz, device=device, classes=[cls],
+                                 verbose=False)
         for img_path, res in zip(batch, results):
             img_w, img_h = Image.open(img_path).size
             lbl_path = labels_dir / f"{img_path.stem}.txt"
@@ -125,10 +131,12 @@ def size_breakdown(model: YOLO, images_dir: Path, labels_dir: Path, imgsz: int, 
     return {"recall_by_gt_size": recall_counts, "false_positives_by_pred_size": fp_counts}
 
 
-def prepare_eval_dataset(testset_dir: Path, work_dir: Path) -> Path:
-    """Rimappa i label di testset_dir (classe ESCOOTER_CLASS_ID) a classe 0
-    dentro work_dir, linkando le immagini invece di copiarle, e scrive un
-    data.yaml a singola classe. Ritorna il path del data.yaml."""
+def prepare_eval_dataset(testset_dir: Path, work_dir: Path, cls_out: int = 0, names: dict | None = None) -> Path:
+    """Rimappa i label di testset_dir (classe ESCOOTER_CLASS_ID) a classe
+    cls_out dentro work_dir, linkando le immagini invece di copiarle, e
+    scrive un data.yaml con le classi `names` (default: solo escooter).
+    Ritorna il path del data.yaml."""
+    names = names or {0: "escooter"}
     if work_dir.exists():
         shutil.rmtree(work_dir)
     images_out = work_dir / "images"
@@ -153,7 +161,7 @@ def prepare_eval_dataset(testset_dir: Path, work_dir: Path) -> Path:
             if cls != ESCOOTER_CLASS_ID:
                 n_other_class += 1
                 continue
-            lines_out.append("0 " + " ".join(parts[1:]))
+            lines_out.append(f"{cls_out} " + " ".join(parts[1:]))
             n_boxes += 1
         (labels_out / lbl.name).write_text("\n".join(lines_out) + ("\n" if lines_out else ""))
     if n_other_class:
@@ -164,8 +172,8 @@ def prepare_eval_dataset(testset_dir: Path, work_dir: Path) -> Path:
         "path": str(work_dir.resolve()),
         "train": "images",  # non usato in validazione, ma richiesto dallo schema data.yaml
         "val": "images",
-        "nc": 1,
-        "names": {0: "escooter"},
+        "nc": len(names),
+        "names": {int(k): v for k, v in names.items()},
     }, sort_keys=False))
 
     n_images = sum(1 for _ in images_out.iterdir())
@@ -179,6 +187,8 @@ def main():
     ap.add_argument("--testset", type=Path, nargs="+", required=True,
                      help="una o più cartelle test set (images/ + labels/, label in classe 80)")
     ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--class-index", type=int, default=0,
+                     help="indice della classe monopattino nei modelli (default 0: modelli monoclasse)")
     ap.add_argument("--device", default="cpu", help="default cpu per non contendere la GPU con eventuali training in corso")
     ap.add_argument("--work-dir", type=Path, default=config.EVAL_WORKDIR)
     ap.add_argument("--out", type=Path, default=None, help="report JSON completo (default: <work-dir>/report.json)")
@@ -188,16 +198,22 @@ def main():
     ap.add_argument("--size-iou", type=float, default=0.5, help="soglia IoU di match per --size-breakdown")
     args = ap.parse_args()
 
-    print("Preparazione test set:")
-    yamls = {}
-    for ts in args.testset:
-        yamls[ts] = prepare_eval_dataset(ts, args.work_dir / ts.name)
+    prepared = {}  # (test set, nomi classi del modello) -> data.yaml
+
+    def eval_yaml(ts: Path, names: dict) -> Path:
+        key = (ts, tuple(sorted(names.items())))
+        if key not in prepared:
+            print(f"Preparazione {ts.name} (classe monopattino {args.class_index}, classi modello {names}):")
+            work = args.work_dir / f"{ts.name}__cls{args.class_index}_nc{len(names)}"
+            prepared[key] = prepare_eval_dataset(ts, work, args.class_index, names)
+        return prepared[key]
 
     report = {}
     rows = []
     for w in args.weights:
         model = YOLO(str(w))
-        for ts, data_yaml in yamls.items():
+        for ts in args.testset:
+            data_yaml = eval_yaml(ts, model.names)
             print(f"\n== {w.parent.parent.name} su {ts.name} ==")
             metrics = model.val(data=str(data_yaml), imgsz=args.imgsz, device=args.device,
                                  split="val", plots=False, save_json=False, verbose=False)
@@ -210,10 +226,8 @@ def main():
                 "mAP50-95": round(float(metrics.box.map), 4),
             }
             if args.size_breakdown:
-                images_dir = data_yaml.parent / "images"
-                labels_dir = data_yaml.parent / "labels"
-                sb = size_breakdown(model, images_dir, labels_dir, args.imgsz, args.device,
-                                     args.size_conf, args.size_iou)
+                sb = size_breakdown(model, data_yaml.parent / "images", data_yaml.parent / "labels", args.imgsz,
+                                     args.device, args.size_conf, args.size_iou, args.class_index)
                 row["size_breakdown"] = sb
             rows.append(row)
             report.setdefault(str(w), {})[ts.name] = row
