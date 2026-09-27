@@ -73,6 +73,28 @@ VIDEO_TESTSET_FPS = _env_float("VIDEO_TESTSET_FPS", 2.0)  # frame estratti per s
 # classe (0) e il data.yaml richiesto da Ultralytics per la validazione
 EVAL_WORKDIR = DATA_ROOT / os.environ.get("EVAL_WORKDIR_DIRNAME", "tmp/eval")
 
+# --- Mining di esempi difficili su dataset nuovi (mine_hard_examples.py) ---
+# soglia di confidenza dell'inferenza: bassa di proposito, per distinguere un box reale "mancato del
+# tutto" da uno "trovato ma con confidenza bassa"
+MINING_CONF_LOW = _env_float("MINING_CONF_LOW", 0.05)
+# un box reale è "trovato bene" se il modello lo prevede (IoU >= MINING_IOU) con confidenza >= questa;
+# sotto è "debole", senza nessuna predizione è "mancato"
+MINING_CONF_HIT = _env_float("MINING_CONF_HIT", 0.25)
+MINING_IOU = _env_float("MINING_IOU", 0.5)
+MINING_MAX_CANDIDATES = _env_int("MINING_MAX_CANDIDATES", 300)
+# distanza di Hamming del pHash sotto la quale una candidata è considerata quasi-duplicata di un'immagine
+# già presente nel pool (train/valid attuali e test set) o di una candidata meglio classificata
+MINING_DEDUP_DISTANCE = _env_int("MINING_DEDUP_DISTANCE", 12)
+# cartelle (ciascuna con una sottocartella images/) contro cui deduplicare le candidate: il pool di
+# training/validation attuale e i test set esterni, che non devono ricevere quasi-duplicati in train
+MINING_POOL_DIRS = [
+    DATA_ROOT / p.strip() for p in os.environ.get(
+        "MINING_POOL_DIRS",
+        "processed/union_reviewed_coco_split/train,processed/union_reviewed_coco_split/valid,"
+        "processed/video_testset_final,processed/holdout_kickboard_a75qx_final",
+    ).split(",") if p.strip()
+]
+
 # --- Classi ---
 ESCOOTER_CLASS_ID = _env_int("ESCOOTER_CLASS_ID", 80)
 PERSON_CLASS_ID = _env_int("PERSON_CLASS_ID", 0)  # classe "person" in COCO
