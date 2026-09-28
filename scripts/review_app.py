@@ -31,8 +31,11 @@ per nome file, dataset, stato o pHash, con un criterio primario e uno
 secondario (per pareggiare i casi di parità del primo).
 
 Le bbox sono modificabili direttamente sul canvas:
-    trascina un'area vuota per crearne una nuova
-    clic su una bbox per selezionarla, trascina per spostarla
+    trascina un'area vuota per crearne una nuova, con la classe del menu
+        "classe" (sotto il canvas, escooter o una qualsiasi classe COCO):
+        utile per colmare a mano i falsi negativi di una pseudo-annotazione
+    clic su una bbox per selezionarla, trascina per spostarla; il menu
+        "classe" mostra la sua classe e la si può riassegnare da lì
     trascina i quadratini della bbox selezionata per ridimensionarla
     x oppure canc = elimina la bbox selezionata
     r = ripristina le bbox originali (prima di qualsiasi modifica)
@@ -256,6 +259,7 @@ PAGE = """<!doctype html>
 <div id="help2">
   trascina un'area vuota per creare una bbox &nbsp; clic/trascina su una bbox per selezionarla/spostarla &nbsp;
   trascina i quadratini per ridimensionare &nbsp; <kbd>x</kbd>/<kbd>canc</kbd> elimina selezionata &nbsp; <kbd>esc</kbd> deseleziona &nbsp; <kbd>h</kbd> mostra/nascondi bbox
+  &nbsp;&nbsp; classe: <select id="class-picker" title="Classe delle nuove bbox; se una bbox è selezionata, la riassegna subito"></select>
   &nbsp;&nbsp; bbox: <span id="box-status">-</span>
   <button id="restore-btn" title="Ripristina le bbox originali (tasto r)">ripristina originali (r)</button>
 </div>
@@ -433,6 +437,29 @@ let currentBoxes = []; // [{cls, xc, yc, w, h}, ...] normalizzati 0..1
 let currentFlagged = []; // [{cls, xc, yc, w, h, label}, ...] scartate per overlap sosia, sola lettura
 let selectedIndex = -1;
 let drag = null;
+
+// Classe da assegnare alla prossima bbox creata (persiste da un'immagine all'altra, comodo per
+// colmare in sequenza più falsi negativi della stessa classe). Se una bbox è selezionata, il
+// menu mostra e permette di cambiare la SUA classe (v. syncClassPicker() e il listener "change").
+let newBoxClass = DEFAULT_CLASS;
+(function initClassPicker() {
+  const sel = document.getElementById("class-picker");
+  const opt = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
+  sel.appendChild(opt(DEFAULT_CLASS, "escooter"));
+  const group = document.createElement("optgroup");
+  group.label = "classi COCO";
+  COCO_NAMES.forEach((name, i) => group.appendChild(opt(i, `${i} ${name}`)));
+  sel.appendChild(group);
+  sel.value = String(newBoxClass);
+  sel.addEventListener("change", () => {
+    newBoxClass = parseInt(sel.value, 10);
+    if (selectedIndex !== -1) {
+      currentBoxes[selectedIndex].cls = newBoxClass;
+      drawBoxes(currentBoxes);
+      saveBoxes();
+    }
+  });
+})();
 let creatingRect = null;
 let boxesVisible = true;
 const FLAGGED_COLOR = "#ff8c00";
@@ -491,6 +518,10 @@ function drawBoxLabel(r, text, color) {
 }
 
 function drawBoxes(boxes) {
+  // il menu classe segue la selezione: mostra la classe della bbox selezionata (e la si può
+  // riassegnare da lì), o quella pronta per la prossima bbox nuova se nessuna è selezionata.
+  document.getElementById("class-picker").value =
+    String(selectedIndex !== -1 && boxes[selectedIndex] ? boxes[selectedIndex].cls : newBoxClass);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (boxesVisible) {
     boxes.forEach((b, i) => {
@@ -796,9 +827,8 @@ window.addEventListener("mouseup", () => {
   if (!drag) return;
   if (drag.mode === "create") {
     if (creatingRect.w >= MIN_BOX_PX && creatingRect.h >= MIN_BOX_PX) {
-      const cls = currentBoxes.length ? currentBoxes[0].cls : DEFAULT_CLASS;
       currentBoxes.push({
-        cls,
+        cls: newBoxClass,
         xc: (creatingRect.x + creatingRect.w / 2) / canvas.width,
         yc: (creatingRect.y + creatingRect.h / 2) / canvas.height,
         w: creatingRect.w / canvas.width,
