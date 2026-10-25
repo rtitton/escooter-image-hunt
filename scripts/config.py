@@ -64,6 +64,17 @@ COCO_OVERLAP_RESCUE_PATH = DATA_ROOT / os.environ.get(
     "COCO_OVERLAP_RESCUE_FILENAME", "coco_overlap_rescue.txt"
 )
 
+# --- Duplicati per detection (find_detection_duplicates.py) ---
+# due box (stessa classe) sono "sovrapposte" se la containment reciproca (intersezione / area di
+# ciascuna, nelle due direzioni) è almeno questa
+DUPLICATE_DETECTION_CONTAINMENT = _env_float("DUPLICATE_DETECTION_CONTAINMENT", 0.9)
+# due immagini finiscono nello stesso gruppo se hanno almeno N box accoppiate (stessa classe,
+# sovrapposte secondo la soglia sopra); funge anche da soglia minima implicita di detection
+DUPLICATE_DETECTION_MIN_MATCHES = _env_int("DUPLICATE_DETECTION_MIN_MATCHES", 4)
+FLAGGED_DETECTION_DUPLICATES_PATH = DATA_ROOT / os.environ.get(
+    "FLAGGED_DETECTION_DUPLICATES_FILENAME", "flagged_detection_duplicates.txt"
+)
+
 # --- Test set da video (extract_video_frames.py) ---
 VIDEO_TESTSET_DIR = DATA_ROOT / os.environ.get("VIDEO_TESTSET_DIRNAME", "processed/video_testset")
 VIDEO_TESTSET_FPS = _env_float("VIDEO_TESTSET_FPS", 2.0)  # frame estratti per secondo di video
