@@ -16,6 +16,15 @@ quasi-duplicati, e separarli fra train e valid farebbe trapelare
 informazione (data leakage), gonfiando artificialmente le metriche di
 validazione. Nomi non numerati restano ciascuno il proprio gruppo.
 
+I dataset Roboflow però condividono foto fra loro (stessa foto con prefisso
+dataset diverso) e includono copie capovolte ("<nome>_flip"): la
+stratificazione per dataset, da sola, le spedirebbe in split diversi. Per
+questo i gruppi vengono uniti anche fra dataset diversi quando hanno lo
+stesso "nome-base" (nome senza prefisso dataset, senza suffisso Roboflow e
+senza "_flip", v. base_key()), e l'intero gruppo unito va nello stesso
+split. È un'euristica sul nome: non vede copie con nome diverso (per quelle
+c'è split_review_app.py).
+
 Split deterministico (--seed, default 42): a differenza del campionamento
 senza seme di build_visual_check_sample.py, qui la riproducibilità conta —
 per confrontare run di training diversi sugli stessi identici split.
@@ -48,6 +57,7 @@ CLASS_NAMES = COCO_NAMES + ["escooter"]  # id 80, coerente con config.ESCOOTER_C
 
 RF_SUFFIX_RE = re.compile(r"_(?:jpe?g|png)\.rf\.[0-9a-f]{32}$", re.IGNORECASE)
 CLIP_FRAME_RE = re.compile(r"^(?P<clip>.*?)[ _-]?(?P<idx>\d+)$")
+FLIP_SUFFIX_RE = re.compile(r"[ _-]?flip$", re.IGNORECASE)
 MAX_PLAUSIBLE_FRAME_IDX = 100_000_000  # oltre questo il "numero" nel nome è un timestamp, non un indice di frame
 
 
@@ -71,6 +81,17 @@ def clip_of(name: str) -> str:
     return m.group("clip") or "_"
 
 
+def base_key(name: str) -> str:
+    """Nome-base di un file per riconoscere la stessa foto in dataset
+    diversi: senza prefisso "<dataset_id>__", senza estensione e suffisso
+    Roboflow, senza "_flip" finale, minuscolo."""
+    stem = RF_SUFFIX_RE.sub("", Path(name).stem)
+    i = stem.find("__")
+    if i != -1:
+        stem = stem[i + 2:]
+    return FLIP_SUFFIX_RE.sub("", stem).lower()
+
+
 def copy_pair(name: str, src_images: Path, src_labels: Path, dst_images: Path, dst_labels: Path) -> None:
     shutil.copy2(src_images / name, dst_images / name)
     lbl_src = src_labels / f"{Path(name).stem}.txt"
@@ -81,54 +102,81 @@ def copy_pair(name: str, src_images: Path, src_labels: Path, dst_images: Path, d
         lbl_dst.write_text("")
 
 
-def split_names(names: list, valid_frac: float, seed: int, group_by_clip: bool) -> tuple[list, list]:
-    """Ritorna (train, valid): split stratificato per dataset sorgente, a
-    livello di gruppo (dataset, clip) cosi che una stessa clip video non
-    venga spezzata fra i due split.
+def split_names(names: list, valid_frac: float, seed: int, group_by_clip: bool) -> tuple[list, list, dict]:
+    """Ritorna (train, valid, per_dataset): split stratificato per dataset
+    sorgente, a livello di gruppo, cosi che né una clip video né copie della
+    stessa foto (stesso base_key, anche fra dataset diversi) vengano spezzate
+    fra i due split. Con group_by_clip=False si divide immagine per immagine.
 
-    Gruppi assegnati con un bilanciamento greedy per deficit (euristica LPT,
-    "longest processing time first"): ordinati dal più grande al più
-    piccolo, ogni gruppo va allo split che ne ha più bisogno per avvicinarsi
-    al proprio target (target - assegnate finora). Necessario perché diversi
-    dataset sorgente sono quasi interamente un'unica clip lunga (centinaia
-    di frame consecutivi): un riempimento ingenuo "valid finché non
-    raggiunge la soglia" può far finire un intero gruppo enorme (e quindi
-    l'intero dataset) tutto in un solo split, sbilanciando pesantemente la
-    proporzione complessiva. Con questa euristica i gruppi più grandi
-    finiscono di norma in train (che parte con un target maggiore), lasciando
-    valid composto da un mix di gruppi più piccoli e vari — comunque
-    l'unico esito possibile, senza leakage, quando un dataset è di fatto
-    una sola clip: va tutto da una parte."""
+    I gruppi (union-find: stessa clip nello stesso dataset, oppure stesso
+    base_key in qualunque dataset) sono assegnati dataset per dataset con un
+    bilanciamento greedy per deficit (euristica LPT, "longest processing time
+    first"): ordinati dal più grande al più piccolo, ogni gruppo va allo split
+    che ne ha più bisogno per avvicinarsi al proprio target (target -
+    assegnate finora). Necessario perché diversi dataset sorgente sono quasi
+    interamente un'unica clip lunga (centinaia di frame consecutivi): un
+    riempimento ingenuo "valid finché non raggiunge la soglia" può far finire
+    un intero gruppo enorme (e quindi l'intero dataset) tutto in un solo
+    split. Un gruppo già assegnato mentre si elaborava un dataset precedente
+    resta dov'è: per i dataset successivi conta come già assegnato nei loro
+    target (quindi i target per dataset sono rispettati solo
+    approssimativamente quando ci sono gruppi che attraversano i dataset)."""
     rng = random.Random(seed)
 
-    groups: dict[tuple, list] = {}
-    for name in names:
-        key = (dataset_of(name), name if not group_by_clip else clip_of(name))
-        groups.setdefault(key, []).append(name)
+    parent = {n: n for n in names}
 
-    by_dataset: dict[str, list] = {}
-    for (ds, _clip), members in groups.items():
-        by_dataset.setdefault(ds, []).append(members)
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
 
-    train, valid = [], []
+    def union_by(key_fn):
+        first = {}
+        for n in names:
+            k = key_fn(n)
+            if k in first:
+                parent[find(n)] = find(first[k])
+            else:
+                first[k] = n
+
+    if group_by_clip:
+        union_by(lambda n: ("clip", dataset_of(n), clip_of(n)))
+        union_by(lambda n: ("base", base_key(n)))
+
+    members_of: dict[str, list] = {}
+    for n in names:
+        members_of.setdefault(find(n), []).append(n)
+
+    by_dataset: dict[str, dict] = {}  # ds -> {root: [nomi del gruppo in questo dataset]}
+    for n in names:
+        by_dataset.setdefault(dataset_of(n), {}).setdefault(find(n), []).append(n)
+
+    side: dict[str, str] = {}  # root -> "train" | "valid"
     per_dataset = {}
     for ds in sorted(by_dataset):
-        group_lists = by_dataset[ds]
+        group_lists = list(by_dataset[ds].items())
         rng.shuffle(group_lists)
-        group_lists.sort(key=len, reverse=True)  # LPT: i più grandi assegnati per primi
-        n_images = sum(len(g) for g in group_lists)
+        group_lists.sort(key=lambda kv: len(kv[1]), reverse=True)  # LPT: i più grandi per primi
+        n_images = sum(len(g) for _, g in group_lists)
         target_valid = round(n_images * valid_frac)
         target_train = n_images - target_valid
-        ds_train, ds_valid = [], []
-        for g in group_lists:
-            if (target_valid - len(ds_valid)) > (target_train - len(ds_train)):
-                ds_valid.extend(g)
+        n_train = sum(len(g) for r, g in group_lists if side.get(r) == "train")
+        n_valid = sum(len(g) for r, g in group_lists if side.get(r) == "valid")
+        for root, g in group_lists:
+            if root in side:
+                continue
+            if (target_valid - n_valid) > (target_train - n_train):
+                side[root] = "valid"
+                n_valid += len(g)
             else:
-                ds_train.extend(g)
-        train.extend(ds_train)
-        valid.extend(ds_valid)
-        per_dataset[ds] = (len(ds_train), len(ds_valid))
-    return train, valid, per_dataset
+                side[root] = "train"
+                n_train += len(g)
+        per_dataset[ds] = (n_train, n_valid)
+
+    train = [n for r, ms in members_of.items() if side[r] == "train" for n in ms]
+    valid = [n for r, ms in members_of.items() if side[r] == "valid" for n in ms]
+    return sorted(train), sorted(valid), per_dataset
 
 
 def write_data_yaml(out_dir: Path) -> None:

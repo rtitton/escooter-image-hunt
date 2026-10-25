@@ -15,7 +15,9 @@ Roboflow diversi, v. dedupe_phash.py — un quasi-duplicato finito per caso
 uno in train e uno in valid gonfia le metriche di validazione). Due modalità:
 
   - "Coppie sospette": per ogni immagine di valid, tutte le immagini di
-    train entro la soglia di distanza pHash (Hamming), raggruppate in una
+    train entro la soglia di distanza pHash (Hamming; vale la minore fra
+    immagine normale e specchiata) o con lo stesso nome-base (stessa foto in
+    dataset diversi, copie "_flip"), raggruppate in una
     riga e ordinate dalla più sospetta: un cluster di copie si risolve in
     una passata. Bottoni per spostare o escludere ciascuna, o per ignorare
     la coppia (non è un duplicato) così non ricompare.
@@ -52,9 +54,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import imagehash
+from PIL import Image, ImageOps
+
 import config
 from review_app import compute_phashes, load_decisions, save_decisions, read_boxes_file
-from split_dataset import dataset_of
+from split_dataset import base_key, dataset_of
 
 SPLITS = ("train", "valid")
 ESCOOTER_CLASS_ID = config.ESCOOTER_CLASS_ID
@@ -103,24 +108,53 @@ def hex_to_int(h: str) -> int:
     return int(h, 16)
 
 
+def compute_mirror_phashes(split_dir: Path, cache_path: Path) -> dict:
+    """pHash dell'immagine specchiata orizzontalmente, con cache come
+    compute_phashes: il dataset contiene copie capovolte ("_flip", ma anche
+    senza marcatura) che il pHash normale non avvicina all'originale."""
+    cache = load_decisions(cache_path)
+    names = list_images(split_dir)
+    changed = False
+    for name in names:
+        path = split_dir / "images" / name
+        stat = path.stat()
+        entry = cache.get(name)
+        if entry and entry.get("mtime") == stat.st_mtime and entry.get("size") == stat.st_size:
+            continue
+        with Image.open(path) as im:
+            phash_hex = str(imagehash.phash(ImageOps.mirror(im)))
+        cache[name] = {"mtime": stat.st_mtime, "size": stat.st_size, "phash": phash_hex}
+        changed = True
+    if changed:
+        save_decisions(cache_path, cache)
+    return {name: cache[name]["phash"] for name in names if name in cache}
+
+
 MAX_MATCHES_PER_GROUP = 12  # oltre, la riga mostra "+N altre" per non allungare la pagina
 
 
-def cross_split_groups(train_phash: dict, valid_phash: dict, dismissed: set, threshold: float) -> list:
-    """Per ogni immagine di valid, le immagini di train con distanza di
-    Hamming del pHash <= threshold (le più vicine per prime, al massimo
-    MAX_MATCHES_PER_GROUP; il resto in "extra"). Le coppie in `dismissed`
+def cross_split_groups(train_phash: dict, valid_phash: dict, train_mirror: dict, dismissed: set, threshold: float) -> list:
+    """Per ogni immagine di valid, le immagini di train candidate duplicate:
+    distanza di Hamming del pHash <= threshold, calcolata anche contro la
+    versione specchiata (vale la minore; "mirrored" dice se è lo specchio),
+    oppure stesso nome-base (base_key: stessa foto in dataset diversi,
+    copie "_flip") a qualunque distanza. Le più vicine per prime, al massimo
+    MAX_MATCHES_PER_GROUP; il resto in "extra". Le coppie in `dismissed`
     (chiave "valid|train") vengono saltate. I gruppi sono ordinati dal più
     sospetto (distanza minima) e omessi se non hanno nessun match."""
-    train_items = [(name, hex_to_int(h)) for name, h in train_phash.items()]
+    train_items = [(name, hex_to_int(h), hex_to_int(train_mirror[name]), base_key(name))
+                   for name, h in train_phash.items() if name in train_mirror]
     groups = []
     for vname, vhash in valid_phash.items():
         vhi = hex_to_int(vhash)
+        vkey = base_key(vname)
         matches = []
-        for tname, thi in train_items:
-            d = (vhi ^ thi).bit_count()
-            if d <= threshold and f"{vname}|{tname}" not in dismissed:
-                matches.append({"train": tname, "distance": d})
+        for tname, thi, tmi, tkey in train_items:
+            d, dm = (vhi ^ thi).bit_count(), (vhi ^ tmi).bit_count()
+            dist = min(d, dm)
+            same_name = tkey == vkey
+            if (dist <= threshold or same_name) and f"{vname}|{tname}" not in dismissed:
+                matches.append({"train": tname, "distance": dist, "mirrored": dm < d, "same_name": same_name})
         if matches:
             matches.sort(key=lambda m: m["distance"])
             groups.append({
@@ -214,7 +248,7 @@ PAGE = """<!doctype html>
 <main>
   <section id="pairs">
     <div id="topbar-pairs">
-      <label>soglia distanza pHash &le; <input type="number" id="pairs-threshold" value="15" min="0" max="64" style="width:55px"></label>
+      <label>soglia distanza pHash &le; <input type="number" id="pairs-threshold" value="10" min="0" max="64" style="width:55px"></label>
       <button class="small" id="pairs-reload">Ricalcola</button>
       <span class="pageinfo" id="pairs-count"></span>
       <span id="legend"><i style="background:#ff3b3b"></i>escooter<i style="background:#3fd23f"></i>person<i style="background:#3b9bff"></i>altre classi</span>
@@ -319,7 +353,7 @@ async function loadPairs() {
       <td><div class="matches">
         ${g.matches.map(m => `
           <div class="match">
-            <div class="dist ${distClass(m.distance)}">distanza ${m.distance}</div>
+            <div class="dist ${distClass(m.distance)}">distanza ${m.distance}${m.mirrored ? " <small>(specchio)</small>" : ""}${m.same_name ? " <small>(stesso nome)</small>" : ""}</div>
             ${thumb("train", m.train, m.boxes)}
             <div class="name">${m.train}<br>${nEsc(m.boxes)} bbox escooter</div>
             <div class="actions">
@@ -424,6 +458,7 @@ class Handler(BaseHTTPRequestHandler):
     # Impostati su main() prima dell'avvio del server.
     dataset_dir: Path
     phash_cache_paths: dict  # {"train": Path, "valid": Path}
+    mirror_cache_paths: dict  # {"train": Path}
     dismissed_path: Path
     move_log_path: Path
 
@@ -437,6 +472,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _phashes(self, split: str) -> dict:
         return compute_phashes(self.dataset_dir / split, self.phash_cache_paths[split])
+
+    def _mirror_phashes(self, split: str) -> dict:
+        return compute_mirror_phashes(self.dataset_dir / split, self.mirror_cache_paths[split])
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -497,9 +535,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
         elif parsed.path == "/api/groups":
-            threshold = float(qs.get("threshold", ["15"])[0])
+            threshold = float(qs.get("threshold", ["10"])[0])
             dismissed = set(load_decisions(self.dismissed_path).keys())
-            groups = cross_split_groups(self._phashes("train"), self._phashes("valid"), dismissed, threshold)
+            groups = cross_split_groups(self._phashes("train"), self._phashes("valid"), self._mirror_phashes("train"), dismissed, threshold)
             for g in groups:
                 g["valid_boxes"] = boxes_of(self.dataset_dir / "valid", g["valid"])
                 for m in g["matches"]:
@@ -536,7 +574,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": False, "error": "niente da annullare"})
                 return
             last = log["moves"][-1]
-            src = self.dataset_dir / other_split(last["from"]) if last.get("action", "move") == "move"                 else excluded_dir(self.dataset_dir, last["from"])
+            src = self.dataset_dir / other_split(last["from"]) if last.get("action", "move") == "move" \
+                else excluded_dir(self.dataset_dir, last["from"])
             try:
                 move_files(src, self.dataset_dir / last["from"], last["name"])
             except (FileNotFoundError, FileExistsError) as e:
@@ -577,6 +616,7 @@ def main() -> None:
         "train": dataset_dir / "split_review_phash_cache_train.json",
         "valid": dataset_dir / "split_review_phash_cache_valid.json",
     }
+    Handler.mirror_cache_paths = {"train": dataset_dir / "split_review_phash_mirror_cache_train.json"}
     Handler.dismissed_path = dataset_dir / "split_review_dismissed.json"
     Handler.move_log_path = dataset_dir / "split_review_moves.json"
 
