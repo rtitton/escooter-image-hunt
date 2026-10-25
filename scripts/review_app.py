@@ -24,11 +24,20 @@ recuperare in coco_overlap_rescue.txt senza dover incrociare a mano il file
 di testo. Nessun effetto se il file non esiste (es. su dataset diversi da
 union_reviewed_coco).
 
+Sulla sinistra, un pannello fisso mostra le prime 40 classi del dataset
+(id, nome, numero di immagini che le contengono, numero di istanze
+totali), ordinate per istanze decrescenti: si aggiorna dopo ogni modifica
+alle bbox, utile per tenere d'occhio la composizione del dataset mentre lo
+si revisiona.
+
 Filtri e ordinamento (barra sotto la testata): si può filtrare l'elenco
 per dataset di origine (dedotto dal prefisso "<dataset_id>__" nel nome
-file) e per stato (selezionata / scartata / non revisionata), e ordinarlo
-per nome file, dataset, stato o pHash, con un criterio primario e uno
-secondario (per pareggiare i casi di parità del primo).
+file), per classe (solo le immagini con almeno una bbox di quella classe
+nel label ATTUALE, cioè già rivisto — non nella pseudo-label di partenza:
+si aggiorna a ogni modifica salvata) e per stato (selezionata / scartata /
+non revisionata), e ordinarlo per nome file, dataset, stato o pHash, con
+un criterio primario e uno secondario (per pareggiare i casi di parità del
+primo).
 
 Le bbox sono modificabili direttamente sul canvas:
     trascina un'area vuota per crearne una nuova, con la classe del menu
@@ -40,6 +49,11 @@ Le bbox sono modificabili direttamente sul canvas:
     x oppure canc = elimina la bbox selezionata
     r = ripristina le bbox originali (prima di qualsiasi modifica)
     h = mostra/nascondi le bbox (utile con istanze ammucchiate)
+    + = zoom in (ogni pressione ingrandisce ulteriormente, fino a 5x); con
+        l'immagine ingrandita si scorre con lo scroll del browser e si
+        continua ad annotare come a zoom 1x (utile per gli oggetti piccoli
+        o le bbox da riallargare sulla parte occlusa)
+    - = torna alla dimensione originale (non zoom out graduale)
     esc = deseleziona
 Ogni modifica viene salvata subito nel file label corrispondente. La
 prima volta che un'immagine viene modificata, il suo file label originale
@@ -64,6 +78,7 @@ poi apri http://localhost:<port> nel browser.
 import argparse
 import json
 import mimetypes
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
@@ -143,6 +158,33 @@ def load_flagged(path: Path) -> dict:
     return flagged
 
 
+def class_stats(labels_dir: Path) -> tuple:
+    """Un solo passaggio sui label correnti (quelli già salvati, non le
+    pseudo-label originali) per due cose:
+    - la lista ordinata (istanze decrescenti) di {classe, n_immagini,
+      n_istanze}, per il pannello "top classi" della UI
+    - {nome immagine: [classi presenti]}, per il filtro per classe — tiene
+      conto di qualunque modifica già salvata (box aggiunte/tolte/
+      riclassificate), non dell'annotazione di partenza."""
+    instances: Counter = Counter()
+    images: Counter = Counter()
+    by_image: dict = {}
+    for lbl in labels_dir.glob("*.txt"):
+        seen = set()
+        for cls, *_ in read_boxes_file(lbl):
+            instances[cls] += 1
+            seen.add(cls)
+        if seen:
+            by_image[lbl.stem] = sorted(seen)
+        for cls in seen:
+            images[cls] += 1
+    stats = sorted(
+        ({"cls": cls, "n_images": images[cls], "n_instances": n} for cls, n in instances.items()),
+        key=lambda d: -d["n_instances"],
+    )
+    return stats, by_image
+
+
 def compute_phashes(dataset_dir: Path, cache_path: Path) -> dict:
     """pHash di ogni immagine del dataset, con cache su disco (invalidata per
     mtime/size, come la cache pHash della pipeline principale in
@@ -182,9 +224,21 @@ PAGE = """<!doctype html>
   #goto-btn { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 10px; margin-left: 4px; cursor: pointer; }
   #goto-btn:hover { background: #444; }
   #phash-status { color: #888; font-size: 12px; }
+  #layout { display: flex; align-items: flex-start; }
+  #sidebar { width: 230px; flex: none; box-sizing: border-box; padding: 12px; background: #161616;
+    border-right: 1px solid #333; font-size: 12px; height: 100vh; overflow-y: auto; }
+  #sidebar h3 { margin: 0 0 10px; font-size: 13px; color: #ccc; font-weight: normal; }
+  #sidebar table { width: 100%; border-collapse: collapse; }
+  #sidebar th { text-align: left; color: #888; font-weight: normal; padding: 2px 4px; border-bottom: 1px solid #333; }
+  #sidebar td { padding: 3px 4px; border-bottom: 1px solid #262626; }
+  #sidebar td.num { text-align: right; color: #bbb; }
+  #main { flex: 1; min-width: 0; }
   #stage { position: relative; display: flex; align-items: center; justify-content: center; height: calc(100vh - 178px); }
+  #stage.zoomed { display: block; overflow: auto; }
   #stage img { max-width: 96vw; max-height: 100%; display: block; }
+  #stage.zoomed img { max-width: none; max-height: none; }
   #stage canvas { position: absolute; pointer-events: auto; cursor: crosshair; }
+  #zoom-status { color: #888; }
   #name { text-align: center; padding: 6px; font-size: 13px; color: #999; word-break: break-all; }
   #res-info { font-weight: bold; font-size: 17px; color: #eee; }
   #decision { font-weight: bold; }
@@ -202,6 +256,15 @@ PAGE = """<!doctype html>
 </style>
 </head>
 <body>
+<div id="layout">
+<aside id="sidebar">
+  <h3>Top 40 classi del dataset</h3>
+  <table>
+    <thead><tr><th>id</th><th>classe</th><th>img</th><th>ist.</th></tr></thead>
+    <tbody id="class-stats-body"></tbody>
+  </table>
+</aside>
+<div id="main">
 <div id="bar">
   <div>Immagine <span id="idx">-</span>/<span id="total">-</span>
     <input type="number" id="goto-input" min="1" placeholder="#" title="Vai all'immagine numero...">
@@ -216,6 +279,11 @@ PAGE = """<!doctype html>
 <div id="filterbar">
   <label>dataset:
     <select id="f-dataset"><option value="">tutti</option></select>
+  </label>
+  <label>classe:
+    <select id="f-class" title="Mostra solo le immagini con almeno una bbox di questa classe, nel label ATTUALE (già rivisto), non nella pseudo-label originale">
+      <option value="">tutte</option>
+    </select>
   </label>
   <label>stato:
     <select id="f-status">
@@ -261,16 +329,20 @@ PAGE = """<!doctype html>
   trascina i quadratini per ridimensionare &nbsp; <kbd>x</kbd>/<kbd>canc</kbd> elimina selezionata &nbsp; <kbd>esc</kbd> deseleziona &nbsp; <kbd>h</kbd> mostra/nascondi bbox
   &nbsp;&nbsp; classe: <select id="class-picker" title="Classe delle nuove bbox; se una bbox è selezionata, la riassegna subito"></select>
   &nbsp;&nbsp; bbox: <span id="box-status">-</span>
+  &nbsp;&nbsp; <kbd>+</kbd>/<kbd>-</kbd> zoom/dimensione originale <span id="zoom-status"></span>
   <button id="restore-btn" title="Ripristina le bbox originali (tasto r)">ripristina originali (r)</button>
 </div>
 <div id="done">Fine: tutte le immagini sono state revisionate.</div>
 <div id="empty">Nessuna immagine corrisponde ai filtri selezionati.</div>
+</div>
+</div>
 
 <script>
 let names = [];
 let decisions = {};
 let flagged = {}; // {name: [descrizioni]} detection scartate per overlap sosia, v. load_flagged()
 let phashes = null; // caricato pigramente, {name: hex}, solo se serve per l'ordinamento
+let classMembership = {}; // {stem immagine: [classi presenti nel label ATTUALE]}, da loadClassStats()
 let view = [];       // elenco filtrato/ordinato attualmente in navigazione
 let idx = 0;
 let renderToken = 0;
@@ -280,6 +352,7 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const fDataset = document.getElementById("f-dataset");
 const fStatus = document.getElementById("f-status");
+const fClass = document.getElementById("f-class");
 const sort1 = document.getElementById("sort1");
 const sort2 = document.getElementById("sort2");
 const gotoInput = document.getElementById("goto-input");
@@ -287,6 +360,11 @@ const gotoBtn = document.getElementById("goto-btn");
 
 function datasetOf(name) {
   const i = name.indexOf("__");
+  return i === -1 ? name : name.slice(0, i);
+}
+
+function stemOf(name) {
+  const i = name.lastIndexOf(".");
   return i === -1 ? name : name.slice(0, i);
 }
 
@@ -308,6 +386,35 @@ async function loadState() {
   idx = view.findIndex(n => !(n in decisions));
   if (idx === -1) idx = 0;
   render();
+  loadClassStats();
+}
+
+async function loadClassStats() {
+  const r = await fetch("/api/class-stats");
+  const data = await r.json();
+  classMembership = data.by_image;
+  document.getElementById("class-stats-body").innerHTML = data.stats.slice(0, 40).map(s => `
+    <tr>
+      <td>${s.cls}</td>
+      <td>${classLabel(s.cls)}</td>
+      <td class="num">${s.n_images}</td>
+      <td class="num">${s.n_instances}</td>
+    </tr>`).join("");
+  // il filtro per classe dipende da classMembership, appena aggiornato: se è attivo, l'immagine
+  // corrente potrebbe non farne più parte (es. hai appena tolto l'ultima bbox di quella classe) —
+  // stesso trattamento già usato altrove quando un'immagine esce dal filtro corrente.
+  if (fClass.value !== "" && view.length) {
+    const name = view[idx];
+    computeView();
+    const keep = view.indexOf(name);
+    if (keep === -1) {
+      idx = Math.min(idx, view.length - 1);
+      render();
+    } else {
+      idx = keep;
+      updateCounts();
+    }
+  }
 }
 
 function populateDatasetFilter() {
@@ -346,9 +453,11 @@ async function ensurePhashesIfNeeded() {
 function computeView() {
   const wantedDataset = fDataset.value;
   const wantedStatus = fStatus.value;
+  const wantedClass = fClass.value === "" ? null : parseInt(fClass.value, 10);
   let filtered = names.filter(n => {
     if (wantedDataset && datasetOf(n) !== wantedDataset) return false;
     if (wantedStatus && statusOf(n) !== wantedStatus) return false;
+    if (wantedClass !== null && !(classMembership[stemOf(n)] || []).includes(wantedClass)) return false;
     return true;
   });
   const k1 = sort1.value, k2 = sort2.value;
@@ -377,7 +486,7 @@ async function applyFiltersAndSort() {
   render();
 }
 
-[fDataset, fStatus, sort1, sort2].forEach(el => el.addEventListener("change", applyFiltersAndSort));
+[fDataset, fStatus, fClass, sort1, sort2].forEach(el => el.addEventListener("change", applyFiltersAndSort));
 
 function updateCounts() {
   let s=0, n=0;
@@ -442,14 +551,21 @@ let drag = null;
 // colmare in sequenza più falsi negativi della stessa classe). Se una bbox è selezionata, il
 // menu mostra e permette di cambiare la SUA classe (v. syncClassPicker() e il listener "change").
 let newBoxClass = DEFAULT_CLASS;
-(function initClassPicker() {
-  const sel = document.getElementById("class-picker");
+
+// Popola un <select> con escooter + le 80 classi COCO (id e nome), condiviso fra il menu classe
+// delle bbox e il filtro per classe della filterbar.
+function populateClassOptions(sel) {
   const opt = (value, label) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; };
   sel.appendChild(opt(DEFAULT_CLASS, "escooter"));
   const group = document.createElement("optgroup");
   group.label = "classi COCO";
   COCO_NAMES.forEach((name, i) => group.appendChild(opt(i, `${i} ${name}`)));
   sel.appendChild(group);
+}
+
+(function initClassPicker() {
+  const sel = document.getElementById("class-picker");
+  populateClassOptions(sel);
   sel.value = String(newBoxClass);
   sel.addEventListener("change", () => {
     newBoxClass = parseInt(sel.value, 10);
@@ -459,6 +575,9 @@ let newBoxClass = DEFAULT_CLASS;
       saveBoxes();
     }
   });
+})();
+(function initClassFilter() {
+  populateClassOptions(document.getElementById("f-class"));
 })();
 let creatingRect = null;
 let boxesVisible = true;
@@ -503,6 +622,37 @@ function resizeCanvas() {
   canvas.height = img.clientHeight;
   canvas.style.width = img.clientWidth + "px";
   canvas.style.height = img.clientHeight + "px";
+  // allineamento esplicito invece di affidarsi al posizionamento statico di un elemento
+  // absolute dentro un contenitore flex: resta corretto sia centrato (zoom 1x) sia in
+  // modalità scroll (zoomato, v. applyZoom()).
+  canvas.style.left = img.offsetLeft + "px";
+  canvas.style.top = img.offsetTop + "px";
+}
+
+// Zoom (tasti + / -): ridimensiona img e canvas ai pixel, non uno scale CSS — così la
+// matematica delle bbox (in pixel di canvas) resta identica a zoom 1x, e #stage.zoomed
+// passa a overflow:auto per scorrere l'immagine ingrandita. baseWidth/baseHeight sono le
+// dimensioni "adattate alla vista" (zoom 1x), ricalcolate a ogni cambio immagine.
+let zoomLevel = 1;
+let baseWidth = 0, baseHeight = 0;
+const ZOOM_STEP = 1.25, ZOOM_MAX = 5;
+const stageEl = document.getElementById("stage");
+
+function applyZoom() {
+  if (zoomLevel === 1) {
+    img.style.width = "";
+    img.style.height = "";
+    stageEl.classList.remove("zoomed");
+    baseWidth = img.clientWidth;
+    baseHeight = img.clientHeight;
+  } else {
+    img.style.width = Math.round(baseWidth * zoomLevel) + "px";
+    img.style.height = Math.round(baseHeight * zoomLevel) + "px";
+    stageEl.classList.add("zoomed");
+  }
+  resizeCanvas();
+  drawBoxes(currentBoxes);
+  document.getElementById("zoom-status").textContent = zoomLevel === 1 ? "" : `(${Math.round(zoomLevel * 100)}%)`;
 }
 
 function drawBoxLabel(r, text, color) {
@@ -585,6 +735,7 @@ async function saveBoxes() {
     const data = await r.json();
     setModifiedBadge(data.modified);
     setBoxStatus("salvato (" + currentBoxes.length + ")");
+    loadClassStats();
   } catch (err) {
     setBoxStatus("errore salvataggio");
   }
@@ -602,6 +753,7 @@ async function restoreBoxes() {
   drawBoxes(currentBoxes);
   setModifiedBadge(data.modified);
   setBoxStatus((data.restored ? "ripristinato (" : "già originale (") + currentBoxes.length + ")");
+  loadClassStats();
 }
 
 document.getElementById("restore-btn").addEventListener("click", restoreBoxes);
@@ -665,8 +817,8 @@ async function render() {
   drag = null;
   creatingRect = null;
   setBoxStatus(currentBoxes.length ? String(currentBoxes.length) : "-");
-  resizeCanvas();
-  drawBoxes(currentBoxes);
+  zoomLevel = 1;
+  applyZoom(); // ricalcola anche baseWidth/baseHeight per la nuova immagine, poi resize+draw
 }
 
 function updateDecisionLabel() {
@@ -849,6 +1001,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "n") setDecision("discard");
   else if (e.key === "r") restoreBoxes();
   else if (e.key === "h") toggleBoxesVisibility();
+  else if (e.key === "+" || e.key === "=") { zoomLevel = Math.min(zoomLevel * ZOOM_STEP, ZOOM_MAX); applyZoom(); }
+  else if (e.key === "-") { zoomLevel = 1; applyZoom(); }
   else if (e.key === "Backspace") setDecision(null);
   else if (e.key === "ArrowRight") { idx = Math.min(idx + 1, view.length - 1); render(); }
   else if (e.key === "ArrowLeft") { idx = Math.max(idx - 1, 0); render(); }
@@ -867,7 +1021,10 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-window.addEventListener("resize", () => { resizeCanvas(); drawBoxes(currentBoxes); });
+window.addEventListener("resize", () => {
+  if (zoomLevel === 1) applyZoom(); // ricalcola baseWidth/baseHeight per il nuovo viewport
+  else { resizeCanvas(); drawBoxes(currentBoxes); } // zoomati: dimensioni esplicite, non dipendono dal viewport
+});
 loadState();
 </script>
 </body>
@@ -924,6 +1081,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"boxes": read_boxes_file(lbl_path), "modified": boxes_modified(lbl_path, backup_path)})
         elif self.path == "/api/phashes":
             self._json({"phashes": compute_phashes(self.dataset_dir, self.phash_cache_path)})
+        elif self.path == "/api/class-stats":
+            stats, by_image = class_stats(self.dataset_dir / "labels")
+            self._json({"stats": stats, "by_image": by_image})
         else:
             self.send_error(404)
 
