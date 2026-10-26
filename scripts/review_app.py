@@ -14,6 +14,19 @@ registra la decisione dell'utente con un tasto:
     end = salta alla prima immagine non revisionata nell'elenco corrente (rispetta i filtri)
     campo "vai a immagine" (in alto): salta alla N-esima immagine dell'elenco corrente
     backspace = cancella la decisione sull'immagine corrente
+    b = alterna fra modalità singola e Browse (v. sotto)
+
+Modalità Browse (bottone "Singola"/"Browse" in alto): una griglia di 12
+miniature per pagina (4 x 3) con le bbox disegnate, per scorrere il dataset
+a colpo d'occhio invece di un'immagine alla volta. Lavora sullo stesso
+elenco filtrato/ordinato della modalità singola; il bordo della miniatura
+indica la decisione (verde = selezionata, rosso = scartata), frecce
+sinistra/destra cambiano pagina, un clic su una miniatura la apre in
+modalità singola, dove si decide e si modificano le bbox.
+
+Il campo "cerca" (barra dei filtri) tiene solo le immagini il cui nome file
+contiene il testo digitato, senza distinguere maiuscole/minuscole; si
+combina con gli altri filtri e vale in entrambe le modalità.
 
 Se l'immagine corrente compare in --flagged-path (default il
 flagged_coco_overlap.txt di annotate_coco_classes.py: detection di classe
@@ -253,6 +266,25 @@ PAGE = """<!doctype html>
   #done { display: none; text-align: center; margin-top: 80px; font-size: 22px; }
   #empty { display: none; text-align: center; margin-top: 80px; font-size: 18px; color: #888; }
   #flagged-banner { display: none; padding: 8px 16px; background: #4a2f00; color: #ffcc66; border-bottom: 1px solid #a66a00; font-size: 13px; font-weight: bold; }
+  #f-search { background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 3px 6px; width: 200px; }
+  #modes { display: flex; gap: 4px; }
+  #modes button { background: #222; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 4px 12px; cursor: pointer; }
+  #modes button.active { background: #2d5a2d; color: #fff; border-color: #3a7a3a; }
+  #browse { padding: 12px 16px; }
+  #browse-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; color: #999; font-size: 13px; }
+  #browse-bar button { background: #333; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 3px 12px; cursor: pointer; }
+  #browse-bar button:hover { background: #444; }
+  #browse-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .card { background: #1b1b1b; border: 2px solid #333; border-radius: 6px; padding: 4px; cursor: pointer; }
+  .card:hover { background: #262626; }
+  .card.select { border-color: #4caf50; }
+  .card.discard { border-color: #e53935; }
+  .card.current { box-shadow: 0 0 0 2px #ffd60a; }
+  .card .imgwrap { position: relative; width: 100%; aspect-ratio: 4/3; background: #000; border-radius: 3px; overflow: hidden; }
+  .card .imgwrap img, .card .imgwrap canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  .card .imgwrap img { object-fit: contain; }
+  .card .imgwrap canvas { pointer-events: none; }
+  .card .meta { font-size: 11px; color: #999; margin-top: 4px; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -270,6 +302,10 @@ PAGE = """<!doctype html>
     <input type="number" id="goto-input" min="1" placeholder="#" title="Vai all'immagine numero...">
     <button id="goto-btn">vai</button>
   </div>
+  <div id="modes">
+    <button id="mode-single" class="active" title="Un'immagine alla volta, con modifica delle bbox">Singola</button>
+    <button id="mode-browse" title="Scorri le immagini a blocchi di 12 miniature (tasto b)">Browse</button>
+  </div>
   <div class="counts">
     <span class="sel">selezionate: <b id="c-select">0</b></span>
     <span class="disc">scartate: <b id="c-discard">0</b></span>
@@ -277,6 +313,9 @@ PAGE = """<!doctype html>
   </div>
 </div>
 <div id="filterbar">
+  <label>cerca:
+    <input type="search" id="f-search" placeholder="parte del nome file" title="Mostra solo le immagini il cui nome file contiene questo testo (senza distinguere maiuscole)">
+  </label>
   <label>dataset:
     <select id="f-dataset"><option value="">tutti</option></select>
   </label>
@@ -313,6 +352,17 @@ PAGE = """<!doctype html>
   </label>
   <span id="phash-status"></span>
 </div>
+<section id="browse" hidden>
+  <div id="browse-bar">
+    <button id="browse-prev">&larr; precedenti</button>
+    <span id="browse-info"></span>
+    <button id="browse-next">successive &rarr;</button>
+    <span>clic su una miniatura per aprirla in modalità singola &nbsp; <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> pagina &nbsp; <kbd>b</kbd> torna a singola</span>
+  </div>
+  <div id="browse-grid"></div>
+  <div id="browse-empty" hidden style="text-align:center;margin-top:60px;font-size:18px;color:#888">Nessuna immagine corrisponde ai filtri selezionati.</div>
+</section>
+<div id="single">
 <div id="flagged-banner"></div>
 <div id="stage">
   <img id="img">
@@ -336,6 +386,7 @@ PAGE = """<!doctype html>
 <div id="empty">Nessuna immagine corrisponde ai filtri selezionati.</div>
 </div>
 </div>
+</div>
 
 <script>
 let names = [];
@@ -353,6 +404,7 @@ const ctx = canvas.getContext("2d");
 const fDataset = document.getElementById("f-dataset");
 const fStatus = document.getElementById("f-status");
 const fClass = document.getElementById("f-class");
+const fSearch = document.getElementById("f-search");
 const sort1 = document.getElementById("sort1");
 const sort2 = document.getElementById("sort2");
 const gotoInput = document.getElementById("goto-input");
@@ -409,7 +461,7 @@ async function loadClassStats() {
     const keep = view.indexOf(name);
     if (keep === -1) {
       idx = Math.min(idx, view.length - 1);
-      render();
+      refresh();
     } else {
       idx = keep;
       updateCounts();
@@ -454,7 +506,9 @@ function computeView() {
   const wantedDataset = fDataset.value;
   const wantedStatus = fStatus.value;
   const wantedClass = fClass.value === "" ? null : parseInt(fClass.value, 10);
+  const query = fSearch.value.trim().toLowerCase();
   let filtered = names.filter(n => {
+    if (query && !n.toLowerCase().includes(query)) return false;
     if (wantedDataset && datasetOf(n) !== wantedDataset) return false;
     if (wantedStatus && statusOf(n) !== wantedStatus) return false;
     if (wantedClass !== null && !(classMembership[stemOf(n)] || []).includes(wantedClass)) return false;
@@ -483,10 +537,116 @@ async function applyFiltersAndSort() {
     // resta sulla stessa posizione: quella successiva prende il suo posto
     idx = keep !== -1 ? keep : Math.min(idx, view.length - 1);
   }
-  render();
+  if (mode === "browse") { browseOffset = 0; idx = 0; } // elenco cambiato: si riparte dalla prima pagina
+  refresh();
 }
 
 [fDataset, fStatus, fClass, sort1, sort2].forEach(el => el.addEventListener("change", applyFiltersAndSort));
+
+// ricerca per nome file: ricalcola a ogni battuta, con un breve ritardo per non rifare il lavoro a ogni tasto
+let searchTimer = null;
+fSearch.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyFiltersAndSort, 200);
+});
+fSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") fSearch.blur(); // rimette i tasti rapidi (s, n, frecce) sull'immagine
+});
+
+// Due modalità: "single" (un'immagine alla volta, modifica bbox) e "browse" (griglia di miniature
+// a blocchi di BROWSE_PAGE, sola lettura con le bbox disegnate). Entrambe lavorano sullo stesso
+// elenco filtrato/ordinato `view`; `idx` resta l'immagine corrente, condivisa fra le due.
+const BROWSE_PAGE = 12;
+let mode = "single";
+let browseOffset = 0;
+let browseToken = 0;
+
+function refresh() {
+  if (mode === "browse") renderBrowse(); else render();
+}
+
+function setMode(newMode) {
+  mode = newMode;
+  document.getElementById("mode-single").classList.toggle("active", mode === "single");
+  document.getElementById("mode-browse").classList.toggle("active", mode === "browse");
+  document.getElementById("single").hidden = mode !== "single";
+  document.getElementById("browse").hidden = mode !== "browse";
+  if (mode === "browse") {
+    browseOffset = Math.floor(idx / BROWSE_PAGE) * BROWSE_PAGE; // la pagina che contiene l'immagine corrente
+    renderBrowse();
+  } else {
+    render();
+  }
+}
+
+function drawThumbBoxes(im) {
+  const cv = im.parentElement.querySelector("canvas");
+  const cw = im.parentElement.clientWidth, ch = im.parentElement.clientHeight;
+  cv.width = cw; cv.height = ch;
+  const nw = im.naturalWidth, nh = im.naturalHeight;
+  if (!nw || !nh || !im._boxes) return;
+  const sc = Math.min(cw / nw, ch / nh), dw = nw * sc, dh = nh * sc;
+  const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+  const tctx = cv.getContext("2d");
+  const boxes = im._boxes.slice().sort((a, b) => (a[0] === DEFAULT_CLASS) - (b[0] === DEFAULT_CLASS)); // escooter per ultime
+  for (const [cls, xc, yc, w, h] of boxes) {
+    tctx.strokeStyle = classColor(cls);
+    tctx.lineWidth = cls === DEFAULT_CLASS ? 3 : 1.5;
+    tctx.strokeRect(ox + (xc - w / 2) * dw, oy + (yc - h / 2) * dh, w * dw, h * dh);
+  }
+}
+
+async function renderBrowse() {
+  const grid = document.getElementById("browse-grid");
+  const info = document.getElementById("browse-info");
+  const token = ++browseToken;
+  document.getElementById("browse-empty").hidden = view.length !== 0;
+  if (view.length === 0) {
+    grid.replaceChildren();
+    info.textContent = "0 immagini";
+    return;
+  }
+  browseOffset = Math.min(Math.max(browseOffset, 0), Math.floor((view.length - 1) / BROWSE_PAGE) * BROWSE_PAGE);
+  const page = view.slice(browseOffset, browseOffset + BROWSE_PAGE);
+  info.textContent = `${browseOffset + 1}-${browseOffset + page.length} di ${view.length}`;
+  updateCounts();
+  const cards = page.map((name, i) => {
+    const card = document.createElement("div");
+    card.className = "card " + statusOf(name) + (browseOffset + i === idx ? " current" : "");
+    const wrap = document.createElement("div");
+    wrap.className = "imgwrap";
+    const im = document.createElement("img");
+    im.loading = "lazy";
+    im.onload = () => drawThumbBoxes(im);
+    im.src = "/api/image/" + encodeURIComponent(name);
+    wrap.append(im, document.createElement("canvas"));
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `#${browseOffset + i + 1}  ${name}`;
+    card.append(wrap, meta);
+    card.onclick = () => { idx = browseOffset + i; setMode("single"); };
+    return card;
+  });
+  grid.replaceChildren(...cards);
+  const boxesList = await Promise.all(page.map(n => fetch("/api/boxes/" + encodeURIComponent(n)).then(r => r.json())));
+  if (token !== browseToken) return; // superata da una navigazione più recente
+  cards.forEach((card, i) => {
+    const im = card.querySelector("img");
+    im._boxes = boxesList[i].boxes;
+    if (im.complete) drawThumbBoxes(im);
+  });
+}
+
+function browseStep(delta) {
+  const last = Math.floor((view.length - 1) / BROWSE_PAGE) * BROWSE_PAGE;
+  browseOffset = Math.min(Math.max(browseOffset + delta * BROWSE_PAGE, 0), Math.max(last, 0));
+  renderBrowse();
+}
+
+document.getElementById("mode-single").addEventListener("click", () => setMode("single"));
+document.getElementById("mode-browse").addEventListener("click", () => setMode("browse"));
+document.getElementById("browse-prev").addEventListener("click", () => browseStep(-1));
+document.getElementById("browse-next").addEventListener("click", () => browseStep(1));
 
 function updateCounts() {
   let s=0, n=0;
@@ -997,6 +1157,12 @@ window.addEventListener("mouseup", () => {
 
 document.addEventListener("keydown", (e) => {
   if (document.activeElement && ["SELECT", "INPUT"].includes(document.activeElement.tagName)) return;
+  if (e.key === "b") { setMode(mode === "browse" ? "single" : "browse"); return; }
+  if (mode === "browse") { // in browse le frecce cambiano pagina, gli altri tasti (decisioni, bbox) non agiscono
+    if (e.key === "ArrowRight") browseStep(1);
+    else if (e.key === "ArrowLeft") browseStep(-1);
+    return;
+  }
   if (e.key === "s") setDecision("select");
   else if (e.key === "n") setDecision("discard");
   else if (e.key === "r") restoreBoxes();
@@ -1022,6 +1188,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("resize", () => {
+  if (mode === "browse") { document.querySelectorAll("#browse-grid img").forEach(drawThumbBoxes); return; }
   if (zoomLevel === 1) applyZoom(); // ricalcola baseWidth/baseHeight per il nuovo viewport
   else { resizeCanvas(); drawBoxes(currentBoxes); } // zoomati: dimensioni esplicite, non dipendono dal viewport
 });
