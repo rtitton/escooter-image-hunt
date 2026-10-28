@@ -62,6 +62,10 @@ Le bbox sono modificabili direttamente sul canvas:
     x oppure canc = elimina la bbox selezionata
     r = ripristina le bbox originali (prima di qualsiasi modifica)
     h = mostra/nascondi le bbox (utile con istanze ammucchiate)
+    e = mostra/nascondi il pallino rosso a metà del bordo superiore delle
+        bbox modificate (nuove, spostate, ridimensionate o con classe
+        cambiata rispetto al backup in review_label_backups); vale anche
+        nelle miniature di Browse. Senza backup nessuna bbox è marcata.
     + = zoom in (ogni pressione ingrandisce ulteriormente, fino a 5x); con
         l'immagine ingrandita si scorre con lo scroll del browser e si
         continua ad annotare come a zoom 1x (utile per gli oggetti piccoli
@@ -140,6 +144,13 @@ def boxes_modified(lbl_path: Path, backup_path: Path) -> bool:
     if not backup_path.exists():
         return False
     return read_boxes_file(lbl_path) != read_boxes_file(backup_path)
+
+
+def original_boxes(backup_path: Path):
+    """Le bbox originali (contenuto del backup) o None se l'immagine non è mai
+    stata modificata: serve all'interfaccia per marcare le singole bbox che
+    non coincidono con nessuna originale (nuove o ritoccate)."""
+    return read_boxes_file(backup_path) if backup_path.exists() else None
 
 
 def load_flagged(path: Path) -> dict:
@@ -376,7 +387,7 @@ PAGE = """<!doctype html>
 </div>
 <div id="help2">
   trascina un'area vuota per creare una bbox &nbsp; clic/trascina su una bbox per selezionarla/spostarla &nbsp;
-  trascina i quadratini per ridimensionare &nbsp; <kbd>x</kbd>/<kbd>canc</kbd> elimina selezionata &nbsp; <kbd>esc</kbd> deseleziona &nbsp; <kbd>h</kbd> mostra/nascondi bbox
+  trascina i quadratini per ridimensionare &nbsp; <kbd>x</kbd>/<kbd>canc</kbd> elimina selezionata &nbsp; <kbd>esc</kbd> deseleziona &nbsp; <kbd>h</kbd> mostra/nascondi bbox &nbsp; <kbd>e</kbd> mostra/nascondi pallino rosso (bbox modificate)
   &nbsp;&nbsp; classe: <select id="class-picker" title="Classe delle nuove bbox; se una bbox è selezionata, la riassegna subito"></select>
   &nbsp;&nbsp; bbox: <span id="box-status">-</span>
   &nbsp;&nbsp; <kbd>+</kbd>/<kbd>-</kbd> zoom/dimensione originale <span id="zoom-status"></span>
@@ -593,6 +604,9 @@ function drawThumbBoxes(im) {
     tctx.strokeStyle = classColor(cls);
     tctx.lineWidth = cls === DEFAULT_CLASS ? 3 : 1.5;
     tctx.strokeRect(ox + (xc - w / 2) * dw, oy + (yc - h / 2) * dh, w * dw, h * dh);
+    if (modifiedDotsVisible && isModifiedBox(cls, xc, yc, w, h, im._original)) {
+      drawModifiedDot(tctx, ox + xc * dw, oy + (yc - h / 2) * dh, 3.5);
+    }
   }
 }
 
@@ -633,6 +647,7 @@ async function renderBrowse() {
   cards.forEach((card, i) => {
     const im = card.querySelector("img");
     im._boxes = boxesList[i].boxes;
+    im._original = boxesList[i].original;
     if (im.complete) drawThumbBoxes(im);
   });
 }
@@ -703,6 +718,28 @@ const CURSOR_FOR_HANDLE = {
 };
 
 let currentBoxes = []; // [{cls, xc, yc, w, h}, ...] normalizzati 0..1
+let originalBoxes = null; // [[cls, xc, yc, w, h], ...] del backup, null se l'immagine non è mai stata modificata
+let modifiedDotsVisible = true; // tasto e: pallino rosso sulle bbox nuove o ritoccate
+
+// Una bbox è "modificata" se esiste un backup e nessuna bbox originale le coincide (stessa classe,
+// coordinate entro 1e-5: i label sono scritti con 6 decimali). Vale per bbox nuove, spostate,
+// ridimensionate o con classe cambiata; senza backup nessuna lo è.
+function isModifiedBox(cls, xc, yc, w, h, original) {
+  if (!original) return false;
+  return !original.some(o => o[0] === cls && Math.abs(o[1] - xc) < 1e-5 && Math.abs(o[2] - yc) < 1e-5
+    && Math.abs(o[3] - w) < 1e-5 && Math.abs(o[4] - h) < 1e-5);
+}
+
+// Pallino rosso a metà del bordo superiore, con contorno bianco per leggersi su qualsiasi sfondo.
+function drawModifiedDot(c, x, y, radius) {
+  c.beginPath();
+  c.arc(x, y, radius, 0, Math.PI * 2);
+  c.fillStyle = "#e53935";
+  c.fill();
+  c.lineWidth = 1.5;
+  c.strokeStyle = "#ffffff";
+  c.stroke();
+}
 let currentFlagged = []; // [{cls, xc, yc, w, h, label}, ...] scartate per overlap sosia, sola lettura
 let selectedIndex = -1;
 let drag = null;
@@ -842,6 +879,9 @@ function drawBoxes(boxes) {
       ctx.lineWidth = selected ? 3 : 2;
       ctx.strokeRect(r.x, r.y, r.w, r.h);
       drawBoxLabel(r, classLabel(b.cls), selected ? "#ffd60a" : color);
+      if (modifiedDotsVisible && isModifiedBox(b.cls, b.xc, b.yc, b.w, b.h, originalBoxes)) {
+        drawModifiedDot(ctx, r.x + r.w / 2, r.y, 5);
+      }
       if (selected) {
         ctx.fillStyle = "#ffd60a";
         for (const h of handlesFor(r)) {
@@ -894,6 +934,8 @@ async function saveBoxes() {
     });
     const data = await r.json();
     setModifiedBadge(data.modified);
+    originalBoxes = data.original; // al primo salvataggio nasce il backup: da qui in poi i pallini hanno un riferimento
+    drawBoxes(currentBoxes);
     setBoxStatus("salvato (" + currentBoxes.length + ")");
     loadClassStats();
   } catch (err) {
@@ -910,6 +952,7 @@ async function restoreBoxes() {
   const data = await r.json();
   currentBoxes = data.boxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
   selectedIndex = -1;
+  originalBoxes = data.original;
   drawBoxes(currentBoxes);
   setModifiedBadge(data.modified);
   setBoxStatus((data.restored ? "ripristinato (" : "già originale (") + currentBoxes.length + ")");
@@ -937,6 +980,16 @@ function toggleBoxesVisibility() {
   setBoxStatus(boxesVisible
     ? (currentBoxes.length ? String(currentBoxes.length) : "-")
     : "nascoste (" + currentBoxes.length + ") — disegno nuove bbox ancora attivo");
+}
+
+function toggleModifiedDots() {
+  modifiedDotsVisible = !modifiedDotsVisible;
+  if (mode === "browse") document.querySelectorAll("#browse-grid img").forEach(drawThumbBoxes);
+  else {
+    drawBoxes(currentBoxes);
+    if (boxesVisible) setBoxStatus((currentBoxes.length ? String(currentBoxes.length) : "-")
+      + (modifiedDotsVisible ? "" : " — pallini rossi nascosti"));
+  }
 }
 
 async function render() {
@@ -968,6 +1021,7 @@ async function render() {
   if (token !== renderToken) return; // superata da una navigazione più recente
   document.getElementById("res-info").textContent = img.naturalWidth + " × " + img.naturalHeight + " px";
   setModifiedBadge(boxesData.modified);
+  originalBoxes = boxesData.original;
   currentBoxes = boxesData.boxes.map(([cls, xc, yc, w, h]) => ({ cls, xc, yc, w, h }));
   currentFlagged = (flagged[name] || []).map(f => {
     const [cls, xc, yc, w, h] = f.box;
@@ -1158,6 +1212,7 @@ window.addEventListener("mouseup", () => {
 document.addEventListener("keydown", (e) => {
   if (document.activeElement && ["SELECT", "INPUT"].includes(document.activeElement.tagName)) return;
   if (e.key === "b") { setMode(mode === "browse" ? "single" : "browse"); return; }
+  if (e.key === "e") { toggleModifiedDots(); return; }
   if (mode === "browse") { // in browse le frecce cambiano pagina, gli altri tasti (decisioni, bbox) non agiscono
     if (e.key === "ArrowRight") browseStep(1);
     else if (e.key === "ArrowLeft") browseStep(-1);
@@ -1245,7 +1300,10 @@ class Handler(BaseHTTPRequestHandler):
             name = unquote(self.path[len("/api/boxes/"):])
             lbl_path = self.dataset_dir / "labels" / f"{Path(name).stem}.txt"
             backup_path = self.backup_dir / f"{Path(name).stem}.txt"
-            self._json({"boxes": read_boxes_file(lbl_path), "modified": boxes_modified(lbl_path, backup_path)})
+            self._json({
+                "boxes": read_boxes_file(lbl_path), "modified": boxes_modified(lbl_path, backup_path),
+                "original": original_boxes(backup_path),
+            })
         elif self.path == "/api/phashes":
             self._json({"phashes": compute_phashes(self.dataset_dir, self.phash_cache_path)})
         elif self.path == "/api/class-stats":
@@ -1283,7 +1341,10 @@ class Handler(BaseHTTPRequestHandler):
             content = "\n".join(lines)
             lbl_path.write_text(content + "\n" if content else "")
             backup_path = self.backup_dir / f"{Path(name).stem}.txt"
-            self._json({"ok": True, "modified": boxes_modified(lbl_path, backup_path)})
+            self._json({
+                "ok": True, "modified": boxes_modified(lbl_path, backup_path),
+                "original": original_boxes(backup_path),
+            })
         elif self.path.startswith("/api/restore-boxes/"):
             name = unquote(self.path[len("/api/restore-boxes/"):])
             lbl_path = self.dataset_dir / "labels" / f"{Path(name).stem}.txt"
@@ -1296,6 +1357,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "ok": True, "restored": restored, "boxes": read_boxes_file(lbl_path),
                 "modified": boxes_modified(lbl_path, backup_path),
+                "original": original_boxes(backup_path),
             })
         else:
             self.send_error(404)
