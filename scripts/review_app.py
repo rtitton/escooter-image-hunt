@@ -146,6 +146,18 @@ def boxes_modified(lbl_path: Path, backup_path: Path) -> bool:
     return read_boxes_file(lbl_path) != read_boxes_file(backup_path)
 
 
+def clip_box(xc: float, yc: float, w: float, h: float):
+    """Ritaglia una bbox YOLO normalizzata (xc, yc, w, h) ai bordi
+    dell'immagine [0, 1] e ne ricalcola centro e dimensioni; None se dopo il
+    ritaglio non resta area (bbox interamente fuori). Una bbox che sporge dal
+    bordo equivarrebbe a una bbox amodale, contraria alla convenzione COCO."""
+    x1, x2 = max(0.0, xc - w / 2), min(1.0, xc + w / 2)
+    y1, y2 = max(0.0, yc - h / 2), min(1.0, yc + h / 2)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return (x1 + x2) / 2, (y1 + y2) / 2, x2 - x1, y2 - y1
+
+
 def original_boxes(backup_path: Path):
     """Le bbox originali (contenuto del backup) o None se l'immagine non è mai
     stata modificata: serve all'interfaccia per marcare le singole bbox che
@@ -811,7 +823,8 @@ function handleAt(r, px, py) {
 
 function getMousePos(e) {
   const rect = canvas.getBoundingClientRect();
-  return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  // limitata al canvas: trascinando oltre il bordo dell'immagine la bbox non può sporgere
+  return { x: clamp(e.clientX - rect.left, 0, canvas.width), y: clamp(e.clientY - rect.top, 0, canvas.height) };
 }
 
 function resizeCanvas() {
@@ -1174,6 +1187,9 @@ window.addEventListener("mousemove", (e) => {
     bottom = clamp(bottom, 0, canvas.height);
     if (right - left < MIN_BOX_PX) { if (h.left) left = right - MIN_BOX_PX; else right = left + MIN_BOX_PX; }
     if (bottom - top < MIN_BOX_PX) { if (h.top) top = bottom - MIN_BOX_PX; else bottom = top + MIN_BOX_PX; }
+    // la dimensione minima non deve rimandare il lato fuori dall'immagine
+    left = clamp(left, 0, canvas.width); right = clamp(right, 0, canvas.width);
+    top = clamp(top, 0, canvas.height); bottom = clamp(bottom, 0, canvas.height);
     const b = currentBoxes[drag.index];
     b.xc = (left + right) / 2 / canvas.width;
     b.yc = (top + bottom) / 2 / canvas.height;
@@ -1332,11 +1348,10 @@ class Handler(BaseHTTPRequestHandler):
             backup_label_once(self.backup_dir, name, lbl_path)
             lines = []
             for cls, xc, yc, w, h in body["boxes"]:
-                xc = min(1.0, max(0.0, float(xc)))
-                yc = min(1.0, max(0.0, float(yc)))
-                w = min(1.0, max(0.0, float(w)))
-                h = min(1.0, max(0.0, float(h)))
-                lines.append(f"{int(cls)} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}")
+                clipped = clip_box(float(xc), float(yc), float(w), float(h))
+                if clipped is None:
+                    continue
+                lines.append(f"{int(cls)} " + " ".join(f"{v:.6f}" for v in clipped))
             lbl_path.parent.mkdir(parents=True, exist_ok=True)
             content = "\n".join(lines)
             lbl_path.write_text(content + "\n" if content else "")
