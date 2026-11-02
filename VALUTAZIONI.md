@@ -200,6 +200,20 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 - Cautela: queste run usano lo split vecchio, le label prima della seconda review e `freeze 10`; il confronto è indicativo e con 86 box il rumore è di qualche box.
 - Costo del small: `escooter_only_26s` con freeze 10 ha impiegato 161 s per epoca (4,4 ore); senza freeze si stimano 5-6 ore a 640, contro le 3,3 del nano.
 
+### Multiclasse a 81 classi (yolo26n)
+
+`scripts/train_yolo26n_multiclass81.sh`: stessa ricetta della baseline (yolo26n, 640, batch 16, nessun freeze, 100 epoche, seed 42) ma su tutte le 81 classi, senza `--classes`. Run: `runs/detect/data/runs/multiclass81_26n`, 3,67 ore (132 s per epoca). Valutata sulla sola escooter (`--class-index 80`, imgsz 640):
+
+| | Valid mAP50 / 50-95 | Video mAP50 / 50-95 | Video recall piccole | Video recall medie | Kickboard mAP50 / 50-95 |
+|---|---|---|---|---|---|
+| Baseline (solo escooter) | 0,964 / 0,742 | 0,726 / 0,502 | 0,151 | 0,738 | 0,972 / 0,816 |
+| Multiclasse 81 classi | 0,912 / 0,685 | 0,553 / 0,387 | 0,035 (3/86) | 0,490 | 0,945 / 0,812 |
+
+- **Peggiora**, soprattutto sul video: precision 0,625 (baseline 0,809), recall 0,481 (0,610).
+- Non è un addestramento troppo corto: la mAP50-95 su tutte le classi passa da 0,313 (epoca 80) a 0,319 (epoca 100).
+- Nel train sono presenti solo 35 delle 81 classi e 20 di queste hanno meno di 30 istanze: il nano divide la capacità fra molte classi con pochi esempi.
+- Il guadagno sulle piccole osservato con `multiclass_11n` (4 classi: person, bicycle, motorcycle, escooter) non si ripete con tutte le classi. Ipotesi non verificate: la testa riparte da zero con 81 uscite, e la escooter potrebbe confondersi con bicycle, motorcycle o person (da controllare sulla matrice di confusione).
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
@@ -213,7 +227,7 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
-1b. Training multiclasse a 81 classi con yolo26n (`train_yolo26n_multiclass81.sh`, stessa ricetta della baseline), per sfruttare le classi COCO già riviste: da valutare sul video test set con `--class-index 80`, guardando il recall sulle piccole e la precision.
+1b. Training multiclasse con poche classi correlate (person, bicycle, motorcycle, escooter) su yolo26n e sul nuovo split, per replicare il guadagno sulle piccole di `multiclass_11n`: il multiclasse a 81 classi non lo ha dato (v. sezione 6).
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.
 4. Decidere la risoluzione di inferenza in base all'uso finale: il costo a 960 è 2,25 volte.
@@ -231,6 +245,7 @@ python3 scripts/clip_label_boxes.py data/processed/union_reviewed_coco
 # training
 scripts/train_yolo26n_baseline.sh
 scripts/train_yolo26n_imgsz960.sh
+scripts/train_yolo26n_multiclass81.sh
 
 # valutazione sui test set indipendenti (--imgsz come in training)
 python3 scripts/eval_testset.py \
@@ -239,4 +254,4 @@ python3 scripts/eval_testset.py \
   --class-index 0 --device 0 --imgsz 640 --out data/tmp/eval_report_baseline_26n.json
 ```
 
-Report JSON delle valutazioni in `data/tmp/`: `eval_report_baseline_26n.json`, `eval_960_at960.json`, `eval_base_at960.json`, `eval_base_at800.json`, `eval_960_at640.json`, `eval_960_at800.json`, `eval_960_at1280.json`.
+Report JSON delle valutazioni in `data/tmp/`: `eval_report_baseline_26n.json`, `eval_960_at960.json`, `eval_base_at960.json`, `eval_base_at800.json`, `eval_960_at640.json`, `eval_960_at800.json`, `eval_960_at1280.json`, `eval_multiclass81_26n.json` (valutato con `--class-index 80`).
