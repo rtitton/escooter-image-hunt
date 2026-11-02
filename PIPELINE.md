@@ -639,6 +639,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `bbox_convert.py` | Libreria di conversione di annotazioni YOLO da poligono a bounding box; usata da `dedupe_augmented.py`, non uno script a sé. |
 | `build_all.sh` | Lancia in sequenza `build_union_dataset.py` e `build_visual_check_sample.py` sul dataset di unione e sui due elenchi flaggati (conducente incluso, soglia di area). |
 | `build_bydataset_annotated.py` | Esporta la selezione finale con le bbox disegnate, organizzata in una cartella per dataset sorgente, per un controllo visivo (v. [sezione 5b](#5b-immagini-annotate-per-dataset--build_bydataset_annotatedpy)). |
+| `build_coco_merged_lists.py` | Unisce COCO (formato YOLO di Ultralytics) e il nostro split in liste `train.txt`/`val.txt` e un `data.yaml` a 81 classi, senza copiare immagini; le nostre immagini di train si possono ripetere (`--repeat`). Usato da `train_yolo26s_coco_escooter.sh`. |
 | `build_index_sample.py` | Costruisce un campione di immagini filtrato a piacere sugli attributi di `data/image_index.json`, con le bbox disegnate (v. [sezione 3b](#3b-campione-dallindice-immagini--build_index_samplepy)). |
 | `build_separated_datasets.py` | Copia le immagini candidate mantenendo i dataset sorgente separati e le classi originali, senza remap a 80 — utile per ispezionare la selezione dataset per dataset. |
 | `build_split_mined.sh` | Dopo la revisione manuale delle candidate di `mine_hard_examples.py`: le aggiunge al train di una copia dello split di training corrente, senza toccare l'originale. |
@@ -679,6 +680,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `train_yolo26n_baseline.sh` | Baseline sullo split di `union_reviewed_coco` (yolo26n, solo escooter, imgsz 640, batch 16, nessun freeze); risultati in [VALUTAZIONI.md](VALUTAZIONI.md). |
 | `train_yolo26n_imgsz960.sh` | Come la baseline ma con imgsz 960 e batch 8 (limite di memoria della GPU), per l'esperimento sugli oggetti piccoli. |
 | `train_yolo26n_multiclass81.sh` | Come la baseline ma su tutte le 81 classi (COCO + escooter); valutare con `eval_testset.py --class-index 80`. |
+| `train_yolo26s_coco_escooter.sh` | Training a 81 classi di yolo26s (pretrained COCO) su COCO + il nostro split, per la macchina con la H100: genera le liste con `build_coco_merged_lists.py` e lancia `train_yolo.py`. Percorsi e parametri da variabili d'ambiente. |
 | `train_yolon_1.sh` | Training di riferimento del nano (yolo26n) monoclasse sul pool attuale. |
 | `train_yolon_multiclass_1.sh` | Come `train_yolon_1.sh` ma con le classi person/bicycle/motorcycle oltre all'escooter, per isolare l'effetto del training monoclasse sui falsi positivi. |
 | `train_yolon_ultralytics_scooter_1.sh` | Training del nano (yolo26n) da zero sul dataset Ultralytics Platform `scooter-detectyolov8`, senza il pool Roboflow. |
