@@ -15,7 +15,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e il 2 novemb
 
 ## Sintesi
 
-- Sul **valid dello split** la baseline arriva a mAP50 0,964 e mAP50-95 0,742: un numero ottimistico.
+- Sul **valid dello split** la baseline arriva a mAP50 0,964 e mAP50-95 0,742. Non è dimostrabilmente gonfiato da leakage (v. [sezione 4](#4-test-set-indipendenti)), ma contiene pochi oggetti piccoli (3% contro 27% del video test set).
 - Sul **video test set** (frame da video, molti oggetti piccoli) la stessa baseline scende a mAP50 0,726 e mAP50-95 0,502; sul **kickboard** (oggetti grandi) regge: 0,972 e 0,816.
 - Il collo di bottiglia sono gli **escooter piccoli** (<32 px): la baseline ne ritrova il 15%. Nel train sono 52 su 2765 istanze (1,9%).
 - **Allenare a 960 aiuta poco** (video: mAP50 0,731 contro 0,726) e costa il doppio del tempo (7,1 ore contro 3,3). Usare la baseline a 960 *senza riaddestrarla* dà di più sul video (0,789) ma peggiora il kickboard (0,834). Nessuna delle due risoluzioni vince su entrambi i test set.
@@ -116,7 +116,26 @@ Scomposizione per taglia (conf ≥ 0,25, IoU ≥ 0,5):
 | Video | grandi | 92 | 0,859 | 12 |
 | Kickboard | grandi | 97 | 0,948 | 13 |
 
-Il valid dello split è quindi troppo ottimista: il video test set è più realistico, e il problema sono gli oggetti piccoli (nel valid ce ne sono solo 14, per questo non emergevano).
+Il video test set è più difficile del valid, e il problema sono gli oggetti piccoli (nel valid ce ne sono solo 14, per questo non emergevano). Se la differenza dipenda da leakage nel valid o da un dominio più difficile lo discute il paragrafo seguente.
+
+### Leakage nel valid o differenza di dominio?
+
+Recall per taglia della baseline a 640 (conf ≥ 0,25, IoU ≥ 0,5, stessa procedura per tutti):
+
+| Insieme | Piccole | Medie | Grandi |
+|---|---|---|---|
+| Valid dello split | 0,786 (n=14) | 0,773 (n=75) | 0,970 (n=335) |
+| `video_testset_final` | 0,151 (n=86) | 0,738 (n=145) | 0,859 (n=92) |
+| `holdout_kickboard_a75qx_final` | n.d. | 1,000 (n=1) | 0,948 (n=97) |
+
+Altri elementi:
+
+- **Composizione:** le istanze piccole sono il 3,3% del valid contro il 27% del video; la mAP complessiva del valid è dominata dalle grandi (79% delle istanze).
+- **Dimensione delle piccole:** lato mediano 26,1 px nel train, 26,3 px nel valid, 23,6 px nel video. Le piccole del video sono solo un po' più piccole, ma sono molto più difficili: la differenza di taglia da sola non basta a spiegare 0,79 contro 0,15.
+- **Distanza dal train (pHash):** per ogni istanza del valid ho preso la distanza pHash minima (normale o speculare) da tutte le immagini del train. Nessuna immagine del valid ha un vicino a distanza <10, il minimo è nell'intervallo 10-15 (33 istanze) o 16-21 (391). Il recall è 0,879 per i vicini più stretti e 0,934 per gli altri, quindi non si vede un vantaggio per le immagini con un vicino vicino (campione piccolo).
+- **Medie e kickboard:** sulle medie valid e video sono alla pari (0,773 contro 0,738) e sulle grandi valid e kickboard sono vicini (mAP50 0,964 contro 0,972). Un leakage diffuso gonfierebbe tutte le taglie e il valid risulterebbe sopra il kickboard, che è un dataset mai visto in training; non succede.
+
+Conclusione: non c'è evidenza di leakage forte. Il valid non è dimostrabilmente gonfiato; è piuttosto poco rappresentativo del caso difficile (oggetti piccoli, frame da video). Restano non escludibili: leakage leggero a livello di scena (stessa scena con foto diverse, che né il nome né il pHash vedono) e, per le piccole, il campione di 14 istanze è troppo piccolo per concludere (11 trovate su 14). Il kickboard conferma che sugli oggetti grandi il valid è affidabile.
 
 ## 5. Esperimento imgsz 960 e sweep sulla risoluzione
 
@@ -165,6 +184,22 @@ Le run precedenti (`escooter_only_11n`, `escooter_only_nofreeze_v1`) sono state 
 
 Le differenze sono piccole su 323 box: il passaggio a yolo26n non fa la differenza da solo.
 
+### Modello più grande e training multiclasse
+
+Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 medie), stessa procedura di scomposizione per taglia (conf ≥ 0,25):
+
+| Run | Recall piccole | Recall medie | mAP50 video |
+|---|---|---|---|
+| `escooter_only_11n` (nano, freeze 10) | 8/86 = 0,09 | 112/145 = 0,77 | 0,683 |
+| `baseline_26n` (nano, senza freeze) | 13/86 = 0,15 | 107/145 = 0,74 | 0,726 |
+| `escooter_only_26s` (small, freeze 10) | 13/86 = 0,15 | 121/145 = 0,83 | 0,734 |
+| `multiclass_11n` (person, bicycle, motorcycle + escooter) | **28/86 = 0,33** | 112/145 = 0,77 | 0,734 |
+
+- Passare a small migliora le medie di 6-9 punti, ma non le piccole (13/86 in entrambi i casi). Un backbone più grande non recupera l'informazione persa nella riduzione di un oggetto di 20-25 px, e nel train le piccole sono poche (52 su 2765 istanze).
+- Il multiclasse nano ha raddoppiato il recall sulle piccole (0,15 → 0,33), con precision più bassa (0,675 contro 0,81 della baseline): il contesto di persone, bici e moto sembra aiutare a trovare lo scooter piccolo.
+- Cautela: queste run usano lo split vecchio, le label prima della seconda review e `freeze 10`; il confronto è indicativo e con 86 box il rumore è di qualche box.
+- Costo del small: `escooter_only_26s` con freeze 10 ha impiegato 161 s per epoca (4,4 ore); senza freeze si stimano 5-6 ore a 640, contro le 3,3 del nano.
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
@@ -178,6 +213,7 @@ Le differenze sono piccole su 323 box: il passaggio a yolo26n non fa la differen
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
+1b. Training multiclasse a 81 classi con yolo26n (`train_yolo26n_multiclass81.sh`, stessa ricetta della baseline), per sfruttare le classi COCO già riviste: da valutare sul video test set con `--class-index 80`, guardando il recall sulle piccole e la precision.
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.
 4. Decidere la risoluzione di inferenza in base all'uso finale: il costo a 960 è 2,25 volte.
