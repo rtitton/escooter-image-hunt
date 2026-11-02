@@ -602,6 +602,16 @@ dataset su un solo split. Quando un dataset sorgente è essenzialmente una
 sola clip, finisce inevitabilmente tutto in un solo split (di norma train)
 — non c'è modo di dargli rappresentanza in valid senza leakage.
 
+I dataset Roboflow però condividono foto fra loro (stessa foto con prefisso
+dataset diverso) e includono copie capovolte (`<nome>_flip`): la
+stratificazione per dataset, da sola, le spedirebbe in split diversi. I
+gruppi vengono quindi uniti anche fra dataset diversi quando hanno lo
+stesso *nome-base* (nome senza prefisso dataset, senza suffisso Roboflow e
+senza `_flip`, v. `base_key()`), e l'intero gruppo unito va nello stesso
+split. È un'euristica sul nome: le copie con nome diverso le cerca
+`split_review_app.py` (pHash anche speculare, box delle detection originali,
+statistiche sulle istanze escooter).
+
 Split deterministico (`--seed`, default 42), a differenza del
 campionamento senza seme di `build_visual_check_sample.py`: qui la
 riproducibilità conta, per confrontare run di training diversi sugli
@@ -636,6 +646,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `build_visual_check_sample.py` | Esporta un campione casuale del dataset di unione con le bbox disegnate, per un controllo visivo rapido (v. [sezione 5](#5-campione-per-controllo-visivo--build_visual_check_samplepy)). |
 | `check_dataset_sync.py` | Confronta `datasets_to_download.csv` con `data/datasets.json` (e con i dataset presenti su disco), segnalando disallineamenti (v. [sezione 1c](#1c-verifica-sincronizzazione-csvindice--check_dataset_syncpy)). |
 | `clear_selection.sh` | Cancella, chiedendo conferma, la cartella `data/processed` e i file di selezione, per ripartire da zero. |
+| `clip_label_boxes.py` | Ritaglia ai bordi dell'immagine le bbox dei label che sporgono (equivarrebbero a box amodali, contrarie alla convenzione COCO); `--dry-run` per vedere cosa cambierebbe. |
 | `compare_multiclass_curves.sh` | Lancia `compare_training_curves.py` sul confronto nano monoclasse (`escooter_only_11n`) / nano multiclasse (`multiclass_11n`). |
 | `compare_training_curves.py` | Confronta, ogni N epoche, le metriche di validation della sola classe escooter tra una run multiclasse (dagli snapshot di `snapshot_checkpoints.py`) e una run monoclasse di riferimento. |
 | `config.py` | Libreria di configurazione centralizzata: legge `scripts/.env` ed espone le costanti usate dagli altri script; non eseguibile direttamente. |
@@ -655,15 +666,18 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `mine_scooter_detect.sh` | Lancia `mine_hard_examples.py` sul dataset Ultralytics Platform `scooter-detectyolov8`. |
 | `mine_ver2_bikes_scooters.sh` | Lancia `mine_hard_examples.py` sul dataset Ultralytics Platform `ver2-bikes-scooters-and-others` (molto augmentato: candidate da rivedere con più cautela). |
 | `report_image_index.py` | Produce un report dettagliato sulle immagini di `data/image_index.json` (conteggi, motivi di esclusione, ecc.). |
-| `review_app.py` | Applicazione locale (browser) per la revisione manuale di un dataset YOLO: selezione delle immagini e modifica delle bbox, di qualunque classe (v. [sezione 6](#6-selezione-manuale-finale--review_apppy)). |
+| `review_app.py` | Applicazione locale (browser) per la revisione manuale di un dataset YOLO: selezione delle immagini e modifica delle bbox, di qualunque classe, con ricerca per nome file, modalità Browse a miniature e pallino rosso sulle bbox modificate rispetto al backup (v. [sezione 6](#6-selezione-manuale-finale--review_apppy)). |
 | `review_app_rider_contaminated.sh` | Apre `review_app.py` sulle immagini flaggate per conducente incluso nella bbox escooter. |
 | `review_app_union.sh` | Apre `review_app.py` sul dataset di unione grezzo. |
 | `review_app_union_reviewed_coco.sh` | Apre `review_app.py` su `union_reviewed_coco`, dopo l'annotazione delle classi COCO. |
 | `select_images.py` | Seleziona le immagini "migliori" tra i dataset deduplicati in `data/interim` (v. [sezione 3](#3-selezione-delle-immagini-candidate--select_imagespy)). |
 | `snapshot_checkpoints.py` | Copia `last.pt` di una run Ultralytics in corso ogni N epoche, per poterne rivalutare a posteriori le metriche alle epoche intermedie. |
 | `split_dataset.py` | Divide un dataset YOLO in train/valid, stratificato per dataset sorgente e con raggruppamento delle clip video (v. [sezione 10](#10-split-trainvalid--split_datasetpy)). |
-| `split_review_app.py` | Applicazione locale per revisionare a mano lo split train/valid: sposta o esclude immagini fra i due, guidata dai quasi-duplicati per pHash. |
+| `split_review_app.py` | Applicazione locale per revisionare a mano lo split train/valid: sposta o esclude immagini fra i due, guidata dai quasi-duplicati (pHash anche speculare, box delle detection originali di yolo11l), con schede Sfoglia e Statistiche sulle istanze escooter. |
+| `split_review_union_reviewed_coco.sh` | Apre `split_review_app.py` su `union_reviewed_coco_split`. |
 | `train_yolo.py` | Avvia un training Ultralytics YOLO su un dataset train/valid, con filtro/remap opzionale delle classi (`--classes`). |
+| `train_yolo26n_baseline.sh` | Baseline sullo split di `union_reviewed_coco` (yolo26n, solo escooter, imgsz 640, batch 16, nessun freeze); risultati in [VALUTAZIONI.md](VALUTAZIONI.md). |
+| `train_yolo26n_imgsz960.sh` | Come la baseline ma con imgsz 960 e batch 8 (limite di memoria della GPU), per l'esperimento sugli oggetti piccoli. |
 | `train_yolon_1.sh` | Training di riferimento del nano (yolo26n) monoclasse sul pool attuale. |
 | `train_yolon_multiclass_1.sh` | Come `train_yolon_1.sh` ma con le classi person/bicycle/motorcycle oltre all'escooter, per isolare l'effetto del training monoclasse sui falsi positivi. |
 | `train_yolon_ultralytics_scooter_1.sh` | Training del nano (yolo26n) da zero sul dataset Ultralytics Platform `scooter-detectyolov8`, senza il pool Roboflow. |
