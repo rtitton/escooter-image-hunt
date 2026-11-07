@@ -20,6 +20,13 @@ con fallback a una copia se il filesystem non supporta i link simbolici.
 La cartella filtrata viene rigenerata a ogni esecuzione (--filtered-dir,
 default accanto al data.yaml sorgente).
 
+Con --resume (che richiede --name) il training interrotto si riprende dal
+last.pt della run <project>/<name>, con gli argomenti salvati nel checkpoint
+(dataset compreso: --data e gli altri parametri vengono ignorati, e un
+dataset filtrato da --classes non viene rigenerato). Non basta passare
+resume=True a Ultralytics con i pesi pretrained: li tratta come un modello
+non riprendibile e avvia un training nuovo.
+
 Avvio:
     python3 scripts/train_yolo.py --data DIR/data.yaml --model yolo11l.pt
         --epochs 100 --batch 16 [--freeze N] [--imgsz 640] [--device cpu|0]
@@ -54,6 +61,21 @@ def link_or_copy(src: Path, dst: Path) -> None:
         dst.symlink_to(src)
     except OSError:
         shutil.copy2(src, dst)
+
+
+def find_last_checkpoint(project: str, name: str) -> Path:
+    """last.pt della run <project>/<name>. Con un --project relativo Ultralytics salva sotto
+    <runs_dir>/detect/<project>/<name> (runs_dir è nelle sue impostazioni, di default ./runs): si cerca
+    anche lì oltre al percorso diretto, e fra più candidati vince il più recente."""
+    from ultralytics.utils import SETTINGS
+
+    base = Path(project)
+    run_dirs = [base / name, Path(SETTINGS["runs_dir"]) / "detect" / base / name, Path("runs/detect") / base / name]
+    found = [d / "weights" / "last.pt" for d in run_dirs if (d / "weights" / "last.pt").is_file()]
+    if not found:
+        raise SystemExit(f"--resume: last.pt non trovato per la run {project}/{name} "
+                         f"(cercato in: {', '.join(str(d / 'weights' / 'last.pt') for d in run_dirs)})")
+    return max(found, key=lambda p: p.stat().st_mtime)
 
 
 def filter_split(images_dir: Path, classes: list, out_dir: Path) -> int:
@@ -138,8 +160,27 @@ def main():
     parser.add_argument("--patience", type=int, default=None, help="Epoche di pazienza per l'early stopping (default: Ultralytics, 100)")
     parser.add_argument("--workers", type=int, default=None, help="Worker del dataloader (default: Ultralytics, 8)")
     parser.add_argument("--seed", type=int, default=None, help="Seed di training (default: Ultralytics, 0)")
-    parser.add_argument("--resume", action="store_true", help="Riprende l'ultimo training interrotto in --project/--name")
+    parser.add_argument("--resume", action="store_true",
+                         help="Riprende il training interrotto della run --project/--name dal suo last.pt "
+                              "(richiede --name; gli altri argomenti vengono ignorati)")
     args = parser.parse_args()
+
+    if args.resume:
+        if args.name is None:
+            raise SystemExit("--resume richiede --name (la run da riprendere)")
+        last = find_last_checkpoint(args.project, args.name)
+        from ultralytics import YOLO
+
+        model = YOLO(str(last))
+        ckpt = model.ckpt or {}
+        # a fine training Ultralytics toglie dal last.pt epoca e stato dell'ottimizzatore: con quel file
+        # resume=True non riprende niente e avvia in silenzio un training nuovo con gli argomenti di default
+        if ckpt.get("epoch", -1) < 0 or ckpt.get("optimizer") is None:
+            raise SystemExit(f"--resume: {last} non è riprendibile: la run è già conclusa (o il file non è un "
+                             "checkpoint di training interrotto)")
+        print(f"Ripresa del training da {last}")
+        model.train(resume=True)
+        return
 
     data_yaml = args.data.resolve()
     if not data_yaml.is_file():
@@ -170,8 +211,6 @@ def main():
         train_kwargs["workers"] = args.workers
     if args.seed is not None:
         train_kwargs["seed"] = args.seed
-    if args.resume:
-        train_kwargs["resume"] = True
 
     print(f"Training {args.model} su {train_yaml}")
     print(f"Parametri: { {k: v for k, v in train_kwargs.items() if k != 'data'} }")
