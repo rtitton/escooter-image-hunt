@@ -1,0 +1,91 @@
+{
+  "models/coco_escooter_yolo11n_bt/weights/best.pt": {
+    "video_testset_final": {
+      "weights": "models/coco_escooter_yolo11n_bt/weights/best.pt",
+      "testset": "video_testset_final",
+      "precision": 0.6862,
+      "recall": 0.3375,
+      "mAP50": 0.4113,
+      "mAP50-95": 0.281,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 0,
+            "fn": 86
+          },
+          "medium": {
+            "tp": 34,
+            "fn": 111
+          },
+          "large": {
+            "tp": 61,
+            "fn": 31
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 9,
+          "large": 8
+        }
+      }
+    },
+    "holdout_kickboard_a75qx_final": {
+      "weights": "models/coco_escooter_yolo11n_bt/weights/best.pt",
+      "testset": "holdout_kickboard_a75qx_final",
+      "precision": 0.9761,
+      "recall": 0.9184,
+      "mAP50": 0.9714,
+      "mAP50-95": 0.7602,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 0,
+            "fn": 0
+          },
+          "medium": {
+            "tp": 1,
+            "fn": 0
+          },
+          "large": {
+            "tp": 89,
+            "fn": 8
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 0,
+          "large": 4
+        }
+      }
+    },
+    "valid": {
+      "weights": "models/coco_escooter_yolo11n_bt/weights/best.pt",
+      "testset": "valid",
+      "precision": 0.9185,
+      "recall": 0.7453,
+      "mAP50": 0.8377,
+      "mAP50-95": 0.5606,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 0,
+            "fn": 14
+          },
+          "medium": {
+            "tp": 18,
+            "fn": 57
+          },
+          "large": {
+            "tp": 294,
+            "fn": 41
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 3,
+          "large": 35
+        }
+      }
+    }
+  }
+}

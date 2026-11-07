@@ -1,0 +1,91 @@
+{
+  "models/coco_escooter_yolo26n_1/weights/best.pt": {
+    "video_testset_final": {
+      "weights": "models/coco_escooter_yolo26n_1/weights/best.pt",
+      "testset": "video_testset_final",
+      "precision": 0.7791,
+      "recall": 0.4056,
+      "mAP50": 0.5008,
+      "mAP50-95": 0.3204,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 0,
+            "fn": 86
+          },
+          "medium": {
+            "tp": 48,
+            "fn": 97
+          },
+          "large": {
+            "tp": 61,
+            "fn": 31
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 4,
+          "large": 5
+        }
+      }
+    },
+    "holdout_kickboard_a75qx_final": {
+      "weights": "models/coco_escooter_yolo26n_1/weights/best.pt",
+      "testset": "holdout_kickboard_a75qx_final",
+      "precision": 0.9673,
+      "recall": 0.9045,
+      "mAP50": 0.9594,
+      "mAP50-95": 0.787,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 0,
+            "fn": 0
+          },
+          "medium": {
+            "tp": 1,
+            "fn": 0
+          },
+          "large": {
+            "tp": 92,
+            "fn": 5
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 0,
+          "large": 10
+        }
+      }
+    },
+    "valid": {
+      "weights": "models/coco_escooter_yolo26n_1/weights/best.pt",
+      "testset": "valid",
+      "precision": 0.9484,
+      "recall": 0.8137,
+      "mAP50": 0.91,
+      "mAP50-95": 0.6672,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 1,
+            "fn": 13
+          },
+          "medium": {
+            "tp": 40,
+            "fn": 35
+          },
+          "large": {
+            "tp": 322,
+            "fn": 13
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 0,
+          "medium": 19,
+          "large": 32
+        }
+      }
+    }
+  }
+}

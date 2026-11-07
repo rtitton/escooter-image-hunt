@@ -661,6 +661,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `eval_multiclass.sh` | Confronta il nano monoclasse col nano multiclasse (person/bicycle/motorcycle + escooter) sui due test set esterni, sulla sola classe escooter. |
 | `eval_nano_vs_small.sh` | Confronta il nano e lo small sui due test set esterni (frame da video e holdout kickboard). |
 | `eval_testset.py` | Valida uno o più pesi YOLO (monoclasse o multiclasse, v. `--class-index`) su uno o più test set esterni, con scomposizione facoltativa delle metriche per taglia small/medium/large. |
+| `export_milestone.py` | Archivia una run di training conclusa come milestone in `models/<nome>/` (copia della run, report di valutazione filtrati per i suoi pesi, README con argomenti, riepilogo e hash); v. `models/README.md`. |
 | `extract_video_frames.py` | Estrae frame a frequenza fissa da una cartella di video, per costruire un test set indipendente dai dataset di training. |
 | `materialize_union_reviewed.py` | Copia solo le immagini con decisione "select" di `review_app.py` in una cartella pronta all'uso (v. [sezione 7](#7-materializzazione-del-dataset-finale--materialize_union_reviewedpy)). |
 | `materialize_union_reviewed_coco.sh` | Richiama `materialize_union_reviewed.py` su `union_reviewed_coco` dopo la sua revisione manuale (v. [sezione 9b](#9b-revisione-manuale-e-materializzazione-finale)). |

@@ -218,7 +218,7 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 
 ### COCO + nostro split su H100 (yolo26n) e confronto con un vecchio yolo11n
 
-Due run da 150 epoche, risultati in `models/` (cartella non tracciata da git: contiene i pesi):
+Due run da 150 epoche, risultati in `models/` (README, args, curve e report di valutazione sono nel repo; i pesi no):
 
 | | `coco_escooter_yolo26n_1` | `coco_escooter_yolo11n_bt` |
 |---|---|---|

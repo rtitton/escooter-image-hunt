@@ -8,3 +8,11 @@ __pycache__/
 pyproject.toml
 uv.lock
 tmp/
+# models/: milestone di training (v. models/README.md). Nel repo vanno args, results, curve, README e report di
+# valutazione; restano fuori i pesi (*.pt, già sopra), i campioni di immagini e le curve per classe (F1/P/PR/R,
+# circa 1 MB l'una con 81 classi), che pesano molto
+models/*/weights/
+models/*/labels.jpg
+models/*/train_batch*.jpg
+models/*/val_batch*.jpg
+models/*/*_curve.png
