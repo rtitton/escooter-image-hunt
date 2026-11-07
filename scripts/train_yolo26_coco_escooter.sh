@@ -3,7 +3,8 @@
 # Pensato per la macchina con la H100, dove c'è COCO (formato YOLO di Ultralytics: images/train2017,
 # labels/train2017, ...). Da lanciare dalla radice del repo clonato lì, dopo aver copiato il nostro split
 # (data/processed/union_reviewed_coco_split) e yolo26n.pt (non è nel repo: .gitignore ignora i .pt).
-# Richiede bash (usa array): non lanciarlo con "sh".
+# Richiede bash (usa array): non lanciarlo con "sh". Usa "uv run python3" come gli altri script, quindi sulla
+# macchina serve uv con l'ambiente del progetto.
 #
 #   scripts/train_yolo26_coco_escooter.sh                      # prima run: nostre immagini ripetute 1 volta
 #   REPEAT=5 scripts/train_yolo26_coco_escooter.sh             # nostre immagini ripetute 5 volte
@@ -54,7 +55,7 @@ fi
 # Liste e data.yaml: si rigenerano a ogni run (con REPEAT diverso cambiano), non quando si riprende una run
 # (i dati devono restare quelli della run originale).
 if [[ "$RESUME" == "0" && "$BUILD_LISTS" == "1" ]]; then
-  python3 scripts/build_coco_merged_lists.py \
+  uv run python3 scripts/build_coco_merged_lists.py \
     --coco-dir "$COCO_DIR" \
     --split-dir "$SPLIT_DIR" \
     --out-dir "$OUT_DIR" \
@@ -79,4 +80,4 @@ if [[ "$RESUME" == "1" ]]; then
   TRAIN_ARGS+=(--resume)  # train_yolo.py cerca last.pt della run <project>/<NAME>
 fi
 
-python3 scripts/train_yolo.py "${TRAIN_ARGS[@]}"
+uv run python3 scripts/train_yolo.py "${TRAIN_ARGS[@]}"
