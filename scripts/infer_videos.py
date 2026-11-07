@@ -15,7 +15,7 @@ multiclasse, così le directory sono confrontabili. Senza --model si usano i
 modelli di MODELLI_DEFAULT.
 
 Avvio (dalla radice del repo):
-    python3 scripts/infer_videos.py /mnt/x/media [--out-dir tmp/video_inference]
+    python3 scripts/infer_videos.py /mnt/x/media [--out-dir inferences]
         [--step 10] [--conf 0.25] [--device 0]
         [--model NOME=PESI[:INDICE_CLASSE[:IMGSZ]] ...]
 
@@ -91,8 +91,8 @@ def process_video(model, video: Path, out_dir: Path, step: int, conf: float, cla
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("videos_dir", type=Path, help="Cartella con i video (ricorsiva)")
-    parser.add_argument("--out-dir", type=Path, default=Path("tmp/video_inference"),
-                         help="Cartella di output (default: tmp/video_inference)")
+    parser.add_argument("--out-dir", type=Path, default=Path("inferences"),
+                         help="Cartella di output (default: inferences, nella radice del repo)")
     parser.add_argument("--step", type=int, default=10, help="Un frame ogni N del video sorgente (default: 10)")
     parser.add_argument("--conf", type=float, default=0.25, help="Soglia di confidenza (default: 0.25)")
     parser.add_argument("--device", default=0, help="Device Ultralytics (default: 0)")

@@ -8,7 +8,12 @@ __pycache__/
 pyproject.toml
 uv.lock
 tmp/
-# models/: milestone di training (v. models/README.md). Nel repo vanno args, results, curve, README e report di
+# inferences/: frame con le box dei modelli e fogli di confronto (infer_videos.py, contact_sheets.py): output
+# generati e pesanti (~120 MB), restano fuori dal repo; nel repo solo il README
+inferences/*
+!inferences/README.md
+
+# models/: milestone di training (v. models/README.md). Nel repo vanno args, results, grafici, README e report di
 # valutazione; restano fuori i pesi (*.pt, già sopra), i campioni di immagini e le curve per classe (F1/P/PR/R,
 # circa 1 MB l'una con 81 classi), che pesano molto
 models/*/weights/

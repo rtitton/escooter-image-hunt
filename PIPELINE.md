@@ -652,6 +652,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `compare_multiclass_curves.sh` | Lancia `compare_training_curves.py` sul confronto nano monoclasse (`escooter_only_11n`) / nano multiclasse (`multiclass_11n`). |
 | `compare_training_curves.py` | Confronta, ogni N epoche, le metriche di validation della sola classe escooter tra una run multiclasse (dagli snapshot di `snapshot_checkpoints.py`) e una run monoclasse di riferimento. |
 | `config.py` | Libreria di configurazione centralizzata: legge `scripts/.env` ed espone le costanti usate dagli altri script; non eseguibile direttamente. |
+| `contact_sheets.py` | Compone i fogli affiancati con lo stesso frame di tutti i modelli (output di `infer_videos.py`), uno per frame, in `inferences/_confronto/`; modelli e colonne da riga di comando. |
 | `dataset_index.py` | Libreria che mantiene aggiornati `data/datasets.json` e `data/README.md` a partire dal CSV dei dataset; usata da `download_dataset.py` e `dedupe_augmented.py`, non uno script a sé. |
 | `dedupe_augmented.py` | Deduplica le varianti augmentate di un dataset scaricato e converte i poligoni in bounding box (v. [sezione 2](#2-deduplica-augmentation--conversione-poligoni--dedupe_augmentedpy)). |
 | `dedupe_phash.py` | Deduplica per contenuto (perceptual hash) il dataset `union_reviewed`, dopo la revisione manuale (v. [sezione 8](#8-opzionale-dedup-phash-a-posteriori--dedupe_phashpy)). |
@@ -663,6 +664,7 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `eval_testset.py` | Valida uno o più pesi YOLO (monoclasse o multiclasse, v. `--class-index`) su uno o più test set esterni, con scomposizione facoltativa delle metriche per taglia small/medium/large. |
 | `export_milestone.py` | Archivia una run di training conclusa come milestone in `models/<nome>/` (copia della run, report di valutazione filtrati per i suoi pesi, README con argomenti, riepilogo e hash); v. `models/README.md`. |
 | `extract_video_frames.py` | Estrae frame a frequenza fissa da una cartella di video, per costruire un test set indipendente dai dataset di training. |
+| `infer_videos.py` | Fa girare uno o più modelli sui video (un frame ogni N, default 10) e salva in `inferences/<modello>/<video>/` i frame con le box della classe escooter disegnate; i modelli di default sono in `MODELLI_DEFAULT` o si indicano con `--model NOME=PESI[:CLASSE[:IMGSZ]]`. |
 | `materialize_union_reviewed.py` | Copia solo le immagini con decisione "select" di `review_app.py` in una cartella pronta all'uso (v. [sezione 7](#7-materializzazione-del-dataset-finale--materialize_union_reviewedpy)). |
 | `materialize_union_reviewed_coco.sh` | Richiama `materialize_union_reviewed.py` su `union_reviewed_coco` dopo la sua revisione manuale (v. [sezione 9b](#9b-revisione-manuale-e-materializzazione-finale)). |
 | `mine_hard_examples.py` | Hard-example mining: seleziona da un dataset esterno già annotato le immagini dove un modello nostro sbaglia (box mancati o deboli), filtrate per area e deduplicate per pHash contro il pool e i test set. |
