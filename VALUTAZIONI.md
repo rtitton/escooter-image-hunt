@@ -19,7 +19,9 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e il 2 novemb
 - Sul **video test set** (frame da video, molti oggetti piccoli) la stessa baseline scende a mAP50 0,726 e mAP50-95 0,502; sul **kickboard** (oggetti grandi) regge: 0,972 e 0,816.
 - Il collo di bottiglia sono gli **escooter piccoli** (<32 px): la baseline ne ritrova il 15%. Nel train sono 52 su 2765 istanze (1,9%).
 - **Allenare a 960 aiuta poco** (video: mAP50 0,731 contro 0,726) e costa il doppio del tempo (7,1 ore contro 3,3). Usare la baseline a 960 *senza riaddestrarla* dà di più sul video (0,789) ma peggiora il kickboard (0,834). Nessuna delle due risoluzioni vince su entrambi i test set.
-- La leva più promettente è **aggiungere esempi piccoli** al train.
+- Il **multiclasse a 81 classi** (solo nostri dati) peggiora la escooter (video mAP50 0,553): le classi sono troppe e con pochi esempi (v. sezione 6).
+- **COCO + nostro split** (H100, yolo26n, nostre immagini ripetute una volta): classi COCO preservate (mAP50-95 globale 0,399), ma la escooter peggiora ancora (video mAP50 0,501 contro 0,726 della baseline), perché le nostre 1812 immagini sono circa l'1,5% del train. Rispetto a un vecchio yolo11n su COCO + un dataset Roboflow non curato, il 26n va meglio sul video e sul nostro valid (v. sezione 6; confronto non controllato).
+- La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
 
@@ -214,6 +216,37 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 - Nel train sono presenti solo 35 delle 81 classi e 20 di queste hanno meno di 30 istanze: il nano divide la capacità fra molte classi con pochi esempi.
 - Il guadagno sulle piccole osservato con `multiclass_11n` (4 classi: person, bicycle, motorcycle, escooter) non si ripete con tutte le classi. Ipotesi non verificate: la testa riparte da zero con 81 uscite, e la escooter potrebbe confondersi con bicycle, motorcycle o person (da controllare sulla matrice di confusione).
 
+### COCO + nostro split su H100 (yolo26n) e confronto con un vecchio yolo11n
+
+Due run da 150 epoche, risultati in `models/` (cartella non tracciata da git: contiene i pesi):
+
+| | `coco_escooter_yolo26n_1` | `coco_escooter_yolo11n_bt` |
+|---|---|---|
+| Dati | COCO + il nostro split (`coco_escooter_merge`, nostre immagini ripetute 1 volta) | COCO + un vecchio dataset Roboflow di monopattini, non curato (`dataYolo.yaml`) |
+| Modello, batch | yolo26n pretrained, batch 32 | yolo11n pretrained, batch 120, `multi_scale` attivo |
+| Altro | 16 worker, patience 20, seed 42; 16,7 ore (circa 400 s per epoca) | 8 worker, patience 50, seed 0; 11,7 ore (279 s per epoca) |
+| Early stopping | no: la migliore epoca è l'ultima (150) | no: idem |
+| Metriche globali (81 classi, sul loro validation set) | P 0,649, R 0,517, mAP50 0,560, mAP50-95 0,399 | P 0,649, R 0,495, mAP50 0,540, mAP50-95 0,384 |
+
+Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si chiama `Monopattino`). I validation set delle due run sono diversi, quindi le metriche globali si confrontano male: il numero del 26n è nell'ordine di quello di un nano addestrato su COCO, cioè le classi COCO non sembrano danneggiate (il confronto per classe è nello script `compare_coco_models.py`, non ancora commentato qui). Valutate localmente sulla sola escooter (`eval_testset.py --class-index 80`, imgsz 640, GPU):
+
+| Insieme | Modello | P | R | mAP50 | mAP50-95 | Recall piccole / medie / grandi |
+|---|---|---|---|---|---|---|
+| Video | 26n + COCO | 0,779 | 0,406 | 0,501 | 0,320 | 0,000 / 0,331 / 0,663 |
+| Video | 11n + dataset Roboflow | 0,686 | 0,338 | 0,411 | 0,281 | 0,000 / 0,234 / 0,663 |
+| Video | baseline nostra (solo escooter) | 0,809 | 0,610 | 0,726 | 0,502 | 0,151 / 0,738 / 0,859 |
+| Kickboard | 26n + COCO | 0,967 | 0,904 | 0,959 | 0,787 | n.d. / n.d. / 0,948 |
+| Kickboard | 11n + dataset Roboflow | 0,976 | 0,918 | 0,971 | 0,760 | n.d. / n.d. / 0,918 |
+| Kickboard | baseline nostra | 0,986 | 0,939 | 0,972 | 0,816 | n.d. / n.d. / 0,948 |
+| Nostro valid | 26n + COCO | 0,948 | 0,814 | 0,910 | 0,667 | 0,071 / 0,533 / 0,961 |
+| Nostro valid | 11n + dataset Roboflow | 0,918 | 0,745 | 0,838 | 0,561 | 0,000 / 0,240 / 0,878 |
+| Nostro valid | baseline nostra | 0,965 | 0,897 | 0,964 | 0,742 | 0,786 / 0,773 / 0,970 |
+
+- **Il merge con COCO diluisce la escooter:** con le nostre immagini ripetute una sola volta (circa 1,5% del train) il 26n è molto sotto la baseline sul video (mAP50 0,501 contro 0,726; recall sulle medie 0,331 contro 0,738) e non trova nessuna piccola. È anche sotto il multiclasse a 81 classi addestrato solo sui nostri dati (video 0,553). È lo scenario che avevamo previsto: la ripetizione delle nostre immagini (3-5 volte) è il passo successivo.
+- **Rispetto al vecchio 11n** il 26n con i nostri dati è meglio sul video (mAP50-95 0,320 contro 0,281, recall sulle medie 0,331 contro 0,234) e sul nostro valid (mAP50-95 0,667 contro 0,561, recall sulle medie 0,533 contro 0,240); sul kickboard sono alla pari (mAP50 0,959 contro 0,971, mAP50-95 0,787 contro 0,760).
+- **Cautela:** il confronto non è controllato. Cambiano architettura (26n contro 11n) e ricetta (batch, `multi_scale`, patience, seed), e non sappiamo se il vecchio dataset Roboflow si sovrapponga ai nostri sorgenti o ai test set: il vantaggio non si può attribuire alla sola cura del dataset.
+- Il nome della run del 26n (`coco_escooter_26s_rep1-16`, in `args.yaml`) dice 26s, ma il modello è yolo26n. L'`args.yaml` del 26n contiene inoltre `cls_remap: true`, argomento che non è nell'Ultralytics 8.4.126 usato qui.
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
@@ -222,11 +255,13 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 - **Dominio:** sei dataset sorgente non hanno immagini in valid.
 - **Soglia della scomposizione per taglia:** conf ≥ 0,25 e IoU ≥ 0,5; non è una AP per taglia.
 - **Valutazioni su CPU:** la baseline a 640 è stata valutata su CPU, le altre su GPU; le metriche dovrebbero coincidere, i tempi per immagine no.
+- **Confronto con il vecchio yolo11n:** non controllato (architettura, ricetta e dataset diversi, possibile sovrapposizione con i nostri sorgenti non verificata).
 - **Sospensione del PC:** le durate misurate nella baseline sono corrette dalla mediana per epoca (120 s); il tempo totale nel `results.csv` include la sospensione.
 
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
+1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/train_yolo26_coco_escooter.sh` lo script rigenera le liste in una cartella dedicata (`coco_escooter_merge_rep5`).
 1b. Training multiclasse con poche classi correlate (person, bicycle, motorcycle, escooter) su yolo26n e sul nuovo split, per replicare il guadagno sulle piccole di `multiclass_11n`: il multiclasse a 81 classi non lo ha dato (v. sezione 6).
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.
@@ -254,4 +289,6 @@ python3 scripts/eval_testset.py \
   --class-index 0 --device 0 --imgsz 640 --out data/tmp/eval_report_baseline_26n.json
 ```
 
-Report JSON delle valutazioni in `data/tmp/`: `eval_report_baseline_26n.json`, `eval_960_at960.json`, `eval_base_at960.json`, `eval_base_at800.json`, `eval_960_at640.json`, `eval_960_at800.json`, `eval_960_at1280.json`, `eval_multiclass81_26n.json` (valutato con `--class-index 80`).
+Report JSON delle valutazioni in `data/tmp/`: `eval_report_baseline_26n.json`, `eval_960_at960.json`, `eval_base_at960.json`, `eval_base_at800.json`, `eval_960_at640.json`, `eval_960_at800.json`, `eval_960_at1280.json`, `eval_multiclass81_26n.json` (valutato con `--class-index 80`), `eval_coco_h100_models.json` (i due modelli di `models/`, `--class-index 80`).
+
+Per le run su COCO (macchina H100): `scripts/train_yolo26_coco_escooter.sh` (variabili d'ambiente per percorsi e parametri) e `scripts/compare_coco_models.py` (AP e precision/recall per classe su COCO val2017, baseline contro modello allenato).
