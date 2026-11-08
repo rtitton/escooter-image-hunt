@@ -80,7 +80,7 @@ Verifica ancora da fare: un campione delle ~2240 box aggiunte che si sovrappongo
 
 ## 3. Baseline yolo26n a 640
 
-`scripts/train_yolo26n_baseline.sh`: yolo26n, solo escooter (`--classes 80`, la classe diventa 0 in un dataset filtrato), 100 epoche, patience 20, imgsz 640, batch 16, nessun freeze, augmentation di default, workers 4, seed 42. Run: `runs/detect/data/runs/baseline_26n_escooter`.
+`scripts/training/train_yolo26n_baseline.sh`: yolo26n, solo escooter (`--classes 80`, la classe diventa 0 in un dataset filtrato), 100 epoche, patience 20, imgsz 640, batch 16, nessun freeze, augmentation di default, workers 4, seed 42. Run: `runs/detect/data/runs/baseline_26n_escooter`.
 
 Risultati sul valid (migliore epoca, la 82):
 
@@ -141,7 +141,7 @@ Conclusione: non c'è evidenza di leakage forte. Il valid non è dimostrabilment
 
 ## 5. Esperimento imgsz 960 e sweep sulla risoluzione
 
-`scripts/train_yolo26n_imgsz960.sh`: stessa ricetta della baseline, ma `imgsz` 960 e `batch` 8 (con batch 12 la GTX 1050 Ti da 4,3 GB andrebbe in out of memory; il test breve ha usato 2,9 GB). Run: `runs/detect/data/runs/imgsz960_26n_escooter`.
+`scripts/training/train_yolo26n_imgsz960.sh`: stessa ricetta della baseline, ma `imgsz` 960 e `batch` 8 (con batch 12 la GTX 1050 Ti da 4,3 GB andrebbe in out of memory; il test breve ha usato 2,9 GB). Run: `runs/detect/data/runs/imgsz960_26n_escooter`.
 
 - Valid (epoca 88): P 0,955, R 0,902, mAP50 0,958, mAP50-95 0,739, praticamente uguale alla baseline.
 - Tempo: 255 s per epoca, 7,09 ore per 100 epoche (3,6 volte più lento per immagine, 2,25 per i soli pixel).
@@ -204,7 +204,7 @@ Dai report delle run precedenti, sul video test set a 640 (86 box piccole, 145 m
 
 ### Multiclasse a 81 classi (yolo26n)
 
-`scripts/train_yolo26n_multiclass81.sh`: stessa ricetta della baseline (yolo26n, 640, batch 16, nessun freeze, 100 epoche, seed 42) ma su tutte le 81 classi, senza `--classes`. Run: `runs/detect/data/runs/multiclass81_26n`, 3,67 ore (132 s per epoca). Valutata sulla sola escooter (`--class-index 80`, imgsz 640):
+`scripts/training/train_yolo26n_multiclass81.sh`: stessa ricetta della baseline (yolo26n, 640, batch 16, nessun freeze, 100 epoche, seed 42) ma su tutte le 81 classi, senza `--classes`. Run: `runs/detect/data/runs/multiclass81_26n`, 3,67 ore (132 s per epoca). Valutata sulla sola escooter (`--class-index 80`, imgsz 640):
 
 | | Valid mAP50 / 50-95 | Video mAP50 / 50-95 | Video recall piccole | Video recall medie | Kickboard mAP50 / 50-95 |
 |---|---|---|---|---|---|
@@ -261,7 +261,7 @@ Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si c
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
-1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/train_yolo26_coco_escooter.sh` lo script rigenera le liste in una cartella dedicata (`coco_escooter_merge_rep5`).
+1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/training/train_yolo26_coco_escooter.sh` lo script rigenera le liste in una cartella dedicata (`coco_escooter_merge_rep5`).
 1b. Training multiclasse con poche classi correlate (person, bicycle, motorcycle, escooter) su yolo26n e sul nuovo split, per replicare il guadagno sulle piccole di `multiclass_11n`: il multiclasse a 81 classi non lo ha dato (v. sezione 6).
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.
@@ -271,19 +271,19 @@ Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si c
 
 ```
 # split e verifica
-python3 scripts/split_dataset.py data/processed/union_reviewed_coco
-scripts/split_review_union_reviewed_coco.sh
+python3 scripts/dataset/split_dataset.py data/processed/union_reviewed_coco
+scripts/dataset/split_review_union_reviewed_coco.sh
 
 # correzione dei bordi (con --dry-run per vedere prima)
-python3 scripts/clip_label_boxes.py data/processed/union_reviewed_coco
+python3 scripts/dataset/clip_label_boxes.py data/processed/union_reviewed_coco
 
 # training
-scripts/train_yolo26n_baseline.sh
-scripts/train_yolo26n_imgsz960.sh
-scripts/train_yolo26n_multiclass81.sh
+scripts/training/train_yolo26n_baseline.sh
+scripts/training/train_yolo26n_imgsz960.sh
+scripts/training/train_yolo26n_multiclass81.sh
 
 # valutazione sui test set indipendenti (--imgsz come in training)
-python3 scripts/eval_testset.py \
+python3 scripts/training/eval_testset.py \
   --weights runs/detect/data/runs/baseline_26n_escooter/weights/best.pt \
   --testset data/processed/video_testset_final data/processed/holdout_kickboard_a75qx_final \
   --class-index 0 --device 0 --imgsz 640 --out data/tmp/eval_report_baseline_26n.json
@@ -291,4 +291,4 @@ python3 scripts/eval_testset.py \
 
 Report JSON delle valutazioni in `data/tmp/`: `eval_report_baseline_26n.json`, `eval_960_at960.json`, `eval_base_at960.json`, `eval_base_at800.json`, `eval_960_at640.json`, `eval_960_at800.json`, `eval_960_at1280.json`, `eval_multiclass81_26n.json` (valutato con `--class-index 80`), `eval_coco_h100_models.json` (i due modelli di `models/`, `--class-index 80`).
 
-Per le run su COCO (macchina H100): `scripts/train_yolo26_coco_escooter.sh` (variabili d'ambiente per percorsi e parametri) e `scripts/compare_coco_models.py` (AP e precision/recall per classe su COCO val2017, baseline contro modello allenato).
+Per le run su COCO (macchina H100): `scripts/training/train_yolo26_coco_escooter.sh` (variabili d'ambiente per percorsi e parametri) e `scripts/training/compare_coco_models.py` (AP e precision/recall per classe su COCO val2017, baseline contro modello allenato).

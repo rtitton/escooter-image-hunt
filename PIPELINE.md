@@ -83,42 +83,42 @@ PYTHONCMD=uv run python3
 #    download + dedupe in batch per tutte quelle righe (chiama
 #    internamente download_dataset.py e dedupe_augmented.py per ognuna:
 #    non vanno lanciati a mano in questo flusso)
-$PYTHONCMD scripts/download_batch.py
+$PYTHONCMD scripts/dataset/download_batch.py
 
 # 1c. (opzionale, utile lavorando su più macchine) verifica che i dataset
 #     previsti dal CSV siano tutti presenti nell'indice/su disco locali
-$PYTHONCMD scripts/check_dataset_sync.py
+$PYTHONCMD scripts/dataset/check_dataset_sync.py
 
 # 2. Selezione delle immagini candidate su tutti i dataset deduplicati registrati
-$PYTHONCMD scripts/select_images.py
+$PYTHONCMD scripts/dataset/select_images.py
 
 # 3. Costruzione del dataset di unione dalle candidate (classe escooter rimappata a 80)
-$PYTHONCMD scripts/build_union_dataset.py
+$PYTHONCMD scripts/dataset/build_union_dataset.py
 
 #    ...e delle immagini flaggate per conducente incluso, per la correzione manuale
-$PYTHONCMD scripts/build_union_dataset.py --candidates-file data/flagged_rider_contamination.txt \
+$PYTHONCMD scripts/dataset/build_union_dataset.py --candidates-file data/flagged_rider_contamination.txt \
     --out-dir data/processed/flagged_rider_contamination
 
 # 3b. (opzionale, indipendente dal passo 3) estrae le candidate mantenendo i
 #     dataset sorgente separati e le classi originali (senza remap a 80),
 #     in data/interim/<id>-selected/ — utile per ispezionare la selezione
 #     dataset per dataset
-$PYTHONCMD scripts/build_selected_datasets.py
+$PYTHONCMD scripts/dataset/build_separated_datasets.py
 
 # 4. (opzionale) Campione per controllo visivo del dataset di unione
-$PYTHONCMD scripts/build_visual_check_sample.py
+$PYTHONCMD scripts/dataset/build_visual_check_sample.py
 
 # 5. Web app per review manuale di un dataset in formato yolo con struttura base/images base/labels. (http://localhost:8765)
-$PYTHONCMD scripts/review_app.py
+$PYTHONCMD scripts/dataset/review_app.py
 
 # 6. Materializza la versione finale del dataset (solo le immagini "select")
-$PYTHONCMD scripts/materialize_union_reviewed.py
+$PYTHONCMD scripts/dataset/materialize_union_reviewed.py
 
 # 6b. (opzionale) Dedup pHash a posteriori del dataset finale, soglia scelta da riga di comando
-$PYTHONCMD scripts/dedupe_phash.py [soglia]
+$PYTHONCMD scripts/dataset/dedupe_phash.py [soglia]
 
 # 7. Annotazione delle classi COCO sul dataset finale (oltre alla classe escooter già presente)
-$PYTHONCMD scripts/annotate_coco_classes.py
+$PYTHONCMD scripts/dataset/annotate_coco_classes.py
 ```
 
 `download_dataset.py` e `dedupe_augmented.py` (sezioni 1 e 2 sotto) restano
@@ -131,7 +131,7 @@ fanno parte del giro "da zero": in quel caso il punto di ingresso è sempre
 Scarica un progetto Roboflow (formato YOLO) in `data/raw/<project>-v<versione>/`.
 
 ```
-python3 scripts/download_dataset.py --workspace <ws> --project <project> \
+python3 scripts/dataset/download_dataset.py --workspace <ws> --project <project> \
     [--version N] [--escooter-class-names "nome1|nome2"]
 ```
 
@@ -159,7 +159,7 @@ leggendo `datasets_to_download.csv` (tracciato completo in
 - `version` valorizzato: scarica esattamente quella versione
 
 ```
-python3 scripts/download_batch.py
+python3 scripts/dataset/download_batch.py
 ```
 
 Elabora solo le righe con `enabled=1` e `download=1`. Questo script non
@@ -183,7 +183,7 @@ dal CSV locale. Questo script confronta `datasets_to_download.csv` con
   `enabled=1` del CSV (es. dopo un allineamento manuale delle versioni)
 
 ```
-python3 scripts/check_dataset_sync.py
+python3 scripts/dataset/check_dataset_sync.py
 ```
 
 Uscita `0` se non ci sono dataset mancanti o disallineati, `1` altrimenti.
@@ -193,7 +193,7 @@ Uscita `0` se non ci sono dataset mancanti o disallineati, `1` altrimenti.
 Costruisce la versione "interim" di un dataset senza toccare il raw.
 
 ```
-python3 scripts/dedupe_augmented.py --dataset-dir data/raw/<id> [--out-dir ...]
+python3 scripts/dataset/dedupe_augmented.py --dataset-dir data/raw/<id> [--out-dir ...]
 ```
 
 Per ogni gruppo di varianti augmentate generate da Roboflow (stesso
@@ -202,7 +202,7 @@ quando possibile, quella senza segni di rotazione (rilevati dal padding a
 cuneo ai bordi, distinto dal letterboxing) — e copia la coppia
 immagine+label in `data/interim/<id>-dedup/`. Le annotazioni a poligono
 vengono convertite nel bounding box minimo che le contiene
-(`scripts/bbox_convert.py`). Scrive un log per esecuzione in
+(`scripts/dataset/bbox_convert.py`). Scrive un log per esecuzione in
 `data/logs/<id>.log` con l'elenco degli scarti e delle conversioni, e
 aggiorna l'indice (`images_dedup`, `dedup_dir`, `converted_polygon_annotations`).
 
@@ -219,7 +219,7 @@ Applica i criteri di qualità (vedi
 su tutti i dataset deduplicati registrati nell'indice.
 
 ```
-python3 scripts/select_images.py [--stage cheap|temporal|dedup|variety|all] [--temporal-dedup] [--limit N]
+python3 scripts/dataset/select_images.py [--stage cheap|temporal|dedup|variety|all] [--temporal-dedup] [--limit N]
 ```
 
 Quattro stadi in sequenza più uno opzionale (i primi eseguibili isolatamente
@@ -303,7 +303,7 @@ le scartate per soglia di area, solo quelle di un dataset specifico) senza
 rilanciare la pipeline.
 
 ```
-python3 scripts/build_index_sample.py --filter "<espressione Python>" --out-dir <cartella> [-n 150]
+python3 scripts/dataset/build_index_sample.py --filter "<espressione Python>" --out-dir <cartella> [-n 150]
 ```
 
 Il filtro è un'espressione Python valutata su ogni voce dell'indice, coi
@@ -323,7 +323,7 @@ COCO vengono annotate in un passo successivo, sul dataset finale, da
 v. sezione 9).
 
 ```
-python3 scripts/build_union_dataset.py [--candidates-file ...] [--out-dir ...] [--limit N]
+python3 scripts/dataset/build_union_dataset.py [--candidates-file ...] [--out-dir ...] [--limit N]
 ```
 
 - i nomi dei file di destinazione sono prefissati con l'id del dataset
@@ -350,7 +350,7 @@ sbagliate, immagini corrotte, ecc.) — è così che è stato scoperto il
 problema del conducente incluso, incluso il caso delle immagini ruotate.
 
 ```
-python3 scripts/visual_check_sample.py [-n 150]
+python3 scripts/dataset/build_visual_check_sample.py [-n 150]
 ```
 
 Ad ogni esecuzione la cartella `data/processed/union_review_sample/` viene
@@ -367,7 +367,7 @@ box escooter disegnate sopra. Utile per rivedere dataset per dataset la
 qualità delle annotazioni sull'intera selezione, non su un campione.
 
 ```
-python3 scripts/build_bydataset_annotated.py [-d DIR] [-o DIR] \
+python3 scripts/dataset/build_bydataset_annotated.py [-d DIR] [-o DIR] \
     [--decisions-file FILE] [--include-discard] [--limit N]
 ```
 
@@ -384,7 +384,7 @@ per una revisione manuale immagine-per-immagine del dataset di unione,
 prima di considerarlo definitivo.
 
 ```
-python3 scripts/review_app.py [--port 8765]
+python3 scripts/dataset/review_app.py [--port 8765]
 ```
 
 Apre un server su `http://localhost:<port>`: mostra un'immagine alla volta
@@ -411,7 +411,7 @@ dataset YOLO pronto all'uso: stessa struttura `images/`+`labels/` del
 dataset sorgente, nomi file invariati.
 
 ```
-python3 scripts/materialize_union_reviewed.py
+python3 scripts/dataset/materialize_union_reviewed.py
     [--source-dir DIR] [--decisions-file FILE] [--out-dir DIR] [--limit N]
 ```
 
@@ -437,7 +437,7 @@ stringere la dedup a posteriori (es. per un dataset di validazione senza
 quasi-duplicati) senza dover rifare selezione o review.
 
 ```
-python3 scripts/dedupe_phash.py [soglia] [--source-dir DIR] [--out-dir DIR] [--phash-cache FILE]
+python3 scripts/dataset/dedupe_phash.py [soglia] [--source-dir DIR] [--out-dir DIR] [--phash-cache FILE]
 ```
 
 - `soglia` (posizionale, opzionale): distanza di Hamming massima fra due
@@ -536,7 +536,7 @@ Solo l'orientazione nativa dell'immagine (le immagini di
 `union_reviewed_phashdedup` non sono ruotate/corrette).
 
 ```
-python3 scripts/annotate_coco_classes.py
+python3 scripts/dataset/annotate_coco_classes.py
     [--source-dir DIR] [--out-dir DIR] [--cache-path FILE] [--model NAME]
     [--batch-size N] [--capture-conf F] [--conf-threshold F]
     [--overlap-threshold F] [--no-implausible-filter] [--refresh-cache]
@@ -566,12 +566,12 @@ python3 scripts/annotate_coco_classes.py
 ## 9b. Revisione manuale e materializzazione finale
 
 Dopo l'annotazione COCO si può rivedere il dataset a occhio con
-`review_app.py` (`scripts/review_app_union_reviewed_coco.sh`), che segnala
+`review_app.py` (`scripts/dataset/review_app_union_reviewed_coco.sh`), che segnala
 anche i casi flaggati per overlap sosia (v. sopra). Le modifiche alle bbox
 sono scritte subito nei label di `union_reviewed_coco/`; per ottenere una
 copia pulita con solo le immagini decise "select" (escludendo quelle
 scartate durante questa revisione), si usa
-`scripts/materialize_union_reviewed_coco.sh`, che richiama
+`scripts/dataset/materialize_union_reviewed_coco.sh`, che richiama
 `materialize_union_reviewed.py` con sorgente/output appropriati
 (`UNION_REVIEWED_COCO_DIRNAME` → `UNION_REVIEWED_COCO_FINAL_DIRNAME`). Da
 rilanciare ogni volta che si riprende la revisione.
@@ -618,7 +618,7 @@ riproducibilità conta, per confrontare run di training diversi sugli
 stessi identici split.
 
 ```
-python3 scripts/split_dataset.py <dataset_dir>
+python3 scripts/dataset/split_dataset.py <dataset_dir>
     [--out-dir DIR] [--valid-frac F] [--seed N] [--no-clip-grouping]
 ```
 
@@ -628,10 +628,15 @@ python3 scripts/split_dataset.py <dataset_dir>
 
 ## Indice degli script
 
-Tutti gli script di `scripts/`, in ordine alfabetico, con una riga di descrizione. Le sezioni sopra
+Gli script stanno in due cartelle, in ordine alfabetico, con una riga di descrizione ciascuno. Le sezioni sopra
 raccontano solo la sequenza principale (download → selezione → revisione → split); qui ci sono anche
-gli script satellite (training, valutazione, mining, revisione dello split). Per i dettagli — argomenti,
-default, formato dei file — vedi la docstring in cima a ciascuno script.
+gli script satellite. Per i dettagli — argomenti, default, formato dei file — vedi la docstring in cima a ciascuno script.
+
+- `scripts/dataset/` — creazione e cura del nostro dataset escooter (download, selezione, dedupe, review, split, mining).
+- `scripts/training/` — COCO (download, subset, merge), training, valutazione, inferenze, milestone.
+- `scripts/config.py` — configurazione condivisa (legge `scripts/.env`); gli script delle due cartelle la importano.
+
+### `scripts/dataset/`
 
 | Script | Descrizione |
 |---|---|
@@ -639,7 +644,6 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `bbox_convert.py` | Libreria di conversione di annotazioni YOLO da poligono a bounding box; usata da `dedupe_augmented.py`, non uno script a sé. |
 | `build_all.sh` | Lancia in sequenza `build_union_dataset.py` e `build_visual_check_sample.py` sul dataset di unione e sui due elenchi flaggati (conducente incluso, soglia di area). |
 | `build_bydataset_annotated.py` | Esporta la selezione finale con le bbox disegnate, organizzata in una cartella per dataset sorgente, per un controllo visivo (v. [sezione 5b](#5b-immagini-annotate-per-dataset--build_bydataset_annotatedpy)). |
-| `build_coco_merged_lists.py` | (con `--coco-train-list` usa un subset al posto di tutto train2017) Unisce COCO (formato YOLO di Ultralytics) e il nostro split in liste `train.txt`/`val.txt` e un `data.yaml` a 81 classi, senza copiare immagini; le nostre immagini di train si possono ripetere (`--repeat`). Usato da `train_yolo26s_coco_escooter.sh`. |
 | `build_index_sample.py` | Costruisce un campione di immagini filtrato a piacere sugli attributi di `data/image_index.json`, con le bbox disegnate (v. [sezione 3b](#3b-campione-dallindice-immagini--build_index_samplepy)). |
 | `build_separated_datasets.py` | Copia le immagini candidate mantenendo i dataset sorgente separati e le classi originali, senza remap a 80 — utile per ispezionare la selezione dataset per dataset. |
 | `build_split_mined.sh` | Dopo la revisione manuale delle candidate di `mine_hard_examples.py`: le aggiunge al train di una copia dello split di training corrente, senza toccare l'originale. |
@@ -648,25 +652,12 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `check_dataset_sync.py` | Confronta `datasets_to_download.csv` con `data/datasets.json` (e con i dataset presenti su disco), segnalando disallineamenti (v. [sezione 1c](#1c-verifica-sincronizzazione-csvindice--check_dataset_syncpy)). |
 | `clear_selection.sh` | Cancella, chiedendo conferma, la cartella `data/processed` e i file di selezione, per ripartire da zero. |
 | `clip_label_boxes.py` | Ritaglia ai bordi dell'immagine le bbox dei label che sporgono (equivarrebbero a box amodali, contrarie alla convenzione COCO); `--dry-run` per vedere cosa cambierebbe. |
-| `compare_coco_models.py` | Confronta baseline COCO e modello allenato sulle 5.000 immagini di COCO val2017: AP e precision/recall per ciascuna delle 80 classi, differenze in punti percentuali e report CSV/JSON. Usa metriche native Ultralytics, non COCOeval ufficiale. Avvio: `python3 scripts/compare_coco_models.py --baseline yolo26n.pt --trained tmp/runs/coco_escooter_yolo26n_rep1-16/weights/best.pt --coco-dir /data/dataset/coco --out-dir data/tmp/coco_comparison --device 0`. |
-| `compare_multiclass_curves.sh` | Lancia `compare_training_curves.py` sul confronto nano monoclasse (`escooter_only_11n`) / nano multiclasse (`multiclass_11n`). |
-| `compare_training_curves.py` | Confronta, ogni N epoche, le metriche di validation della sola classe escooter tra una run multiclasse (dagli snapshot di `snapshot_checkpoints.py`) e una run monoclasse di riferimento. |
-| `config.py` | Libreria di configurazione centralizzata: legge `scripts/.env` ed espone le costanti usate dagli altri script; non eseguibile direttamente. |
-| `contact_sheets.py` | Compone i fogli affiancati con lo stesso frame di tutti i modelli (output di `infer_videos.py`), uno per frame, in `inferences/_confronto/`; modelli e colonne da riga di comando. |
 | `dataset_index.py` | Libreria che mantiene aggiornati `data/datasets.json` e `data/README.md` a partire dal CSV dei dataset; usata da `download_dataset.py` e `dedupe_augmented.py`, non uno script a sé. |
 | `dedupe_augmented.py` | Deduplica le varianti augmentate di un dataset scaricato e converte i poligoni in bounding box (v. [sezione 2](#2-deduplica-augmentation--conversione-poligoni--dedupe_augmentedpy)). |
 | `dedupe_phash.py` | Deduplica per contenuto (perceptual hash) il dataset `union_reviewed`, dopo la revisione manuale (v. [sezione 8](#8-opzionale-dedup-phash-a-posteriori--dedupe_phashpy)). |
 | `download_batch.py` | Esegue download + dedupe per ogni dataset abilitato nel CSV (v. [sezione 1b](#1b-download-batch-da-csv--download_batchpy)). |
-| `download_coco.sh` | Scarica COCO 2017 (etichette YOLO Ultralytics + immagini train2017/val2017) in `data/coco` (`COCO_DIR` per cambiare); riprendibile. |
 | `download_dataset.py` | Scarica un singolo dataset Roboflow in formato YOLO in `data/raw/` (v. [sezione 1](#1-download-di-un-dataset--download_datasetpy)). |
-| `eval_mined.sh` | Confronta lo small sul pool attuale con lo stesso small addestrato anche sulle candidate del mining, sui due test set esterni. |
-| `eval_multiclass.sh` | Confronta il nano monoclasse col nano multiclasse (person/bicycle/motorcycle + escooter) sui due test set esterni, sulla sola classe escooter. |
-| `eval_nano_vs_small.sh` | Confronta il nano e lo small sui due test set esterni (frame da video e holdout kickboard). |
-| `eval_testset.py` | Valida uno o più pesi YOLO (monoclasse o multiclasse, v. `--class-index`) su uno o più test set esterni, con scomposizione facoltativa delle metriche per taglia small/medium/large. |
-| `export_milestone.py` | Archivia una run di training conclusa come milestone in `models/<nome>/` (copia della run, report di valutazione filtrati per i suoi pesi, README con argomenti, riepilogo e hash); v. `models/README.md`. |
 | `extract_video_frames.py` | Estrae frame a frequenza fissa da una cartella di video, per costruire un test set indipendente dai dataset di training. |
-| `infer_videos.py` | Fa girare uno o più modelli sui video (un frame ogni N, default 10) e salva in `inferences/<modello>/<video>/` i frame con le box della classe escooter disegnate; i modelli di default sono in `MODELLI_DEFAULT` o si indicano con `--model NOME=PESI[:CLASSE[:IMGSZ]]`. |
-| `make_coco_subset.py` | Sceglie un sottoinsieme di COCO (formato YOLO) per classi (nomi, indici o preset `traffic`) e numero massimo di immagini, con quote per classe dalla più rara (le rare si prendono intere, le frequenti si tagliano); tiene tutte le etichette delle immagini scelte. Scrive la lista dei percorsi (per `build_coco_merged_lists.py --coco-train-list`) e un CSV per classe. |
 | `materialize_union_reviewed.py` | Copia solo le immagini con decisione "select" di `review_app.py` in una cartella pronta all'uso (v. [sezione 7](#7-materializzazione-del-dataset-finale--materialize_union_reviewedpy)). |
 | `materialize_union_reviewed_coco.sh` | Richiama `materialize_union_reviewed.py` su `union_reviewed_coco` dopo la sua revisione manuale (v. [sezione 9b](#9b-revisione-manuale-e-materializzazione-finale)). |
 | `mine_hard_examples.py` | Hard-example mining: seleziona da un dataset esterno già annotato le immagini dove un modello nostro sbaglia (box mancati o deboli), filtrate per area e deduplicate per pHash contro il pool e i test set. |
@@ -678,10 +669,28 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `review_app_union.sh` | Apre `review_app.py` sul dataset di unione grezzo. |
 | `review_app_union_reviewed_coco.sh` | Apre `review_app.py` su `union_reviewed_coco`, dopo l'annotazione delle classi COCO. |
 | `select_images.py` | Seleziona le immagini "migliori" tra i dataset deduplicati in `data/interim` (v. [sezione 3](#3-selezione-delle-immagini-candidate--select_imagespy)). |
-| `snapshot_checkpoints.py` | Copia `last.pt` di una run Ultralytics in corso ogni N epoche, per poterne rivalutare a posteriori le metriche alle epoche intermedie. |
 | `split_dataset.py` | Divide un dataset YOLO in train/valid, stratificato per dataset sorgente e con raggruppamento delle clip video (v. [sezione 10](#10-split-trainvalid--split_datasetpy)). |
 | `split_review_app.py` | Applicazione locale per revisionare a mano lo split train/valid: sposta o esclude immagini fra i due, guidata dai quasi-duplicati (pHash anche speculare, box delle detection originali di yolo11l), con schede Sfoglia e Statistiche sulle istanze escooter. |
 | `split_review_union_reviewed_coco.sh` | Apre `split_review_app.py` su `union_reviewed_coco_split`. |
+
+### `scripts/training/`
+
+| Script | Descrizione |
+|---|---|
+| `build_coco_merged_lists.py` | (con `--coco-train-list` usa un subset al posto di tutto train2017) Unisce COCO (formato YOLO di Ultralytics) e il nostro split in liste `train.txt`/`val.txt` e un `data.yaml` a 81 classi, senza copiare immagini; le nostre immagini di train si possono ripetere (`--repeat`). Usato da `train_yolo26s_coco_escooter.sh`. |
+| `compare_coco_models.py` | Confronta baseline COCO e modello allenato sulle 5.000 immagini di COCO val2017: AP e precision/recall per ciascuna delle 80 classi, differenze in punti percentuali e report CSV/JSON. Usa metriche native Ultralytics, non COCOeval ufficiale. Avvio: `python3 scripts/training/compare_coco_models.py --baseline yolo26n.pt --trained tmp/runs/coco_escooter_yolo26n_rep1-16/weights/best.pt --coco-dir /data/dataset/coco --out-dir data/tmp/coco_comparison --device 0`. |
+| `compare_multiclass_curves.sh` | Lancia `compare_training_curves.py` sul confronto nano monoclasse (`escooter_only_11n`) / nano multiclasse (`multiclass_11n`). |
+| `compare_training_curves.py` | Confronta, ogni N epoche, le metriche di validation della sola classe escooter tra una run multiclasse (dagli snapshot di `snapshot_checkpoints.py`) e una run monoclasse di riferimento. |
+| `contact_sheets.py` | Compone i fogli affiancati con lo stesso frame di tutti i modelli (output di `infer_videos.py`), uno per frame, in `inferences/_confronto/`; modelli e colonne da riga di comando. |
+| `download_coco.sh` | Scarica COCO 2017 (etichette YOLO Ultralytics + immagini train2017/val2017) in `data/coco` (`COCO_DIR` per cambiare); riprendibile. |
+| `eval_mined.sh` | Confronta lo small sul pool attuale con lo stesso small addestrato anche sulle candidate del mining, sui due test set esterni. |
+| `eval_multiclass.sh` | Confronta il nano monoclasse col nano multiclasse (person/bicycle/motorcycle + escooter) sui due test set esterni, sulla sola classe escooter. |
+| `eval_nano_vs_small.sh` | Confronta il nano e lo small sui due test set esterni (frame da video e holdout kickboard). |
+| `eval_testset.py` | Valida uno o più pesi YOLO (monoclasse o multiclasse, v. `--class-index`) su uno o più test set esterni, con scomposizione facoltativa delle metriche per taglia small/medium/large. |
+| `export_milestone.py` | Archivia una run di training conclusa come milestone in `models/<nome>/` (copia della run, report di valutazione filtrati per i suoi pesi, README con argomenti, riepilogo e hash); v. `models/README.md`. |
+| `infer_videos.py` | Fa girare uno o più modelli sui video (un frame ogni N, default 10) e salva in `inferences/<modello>/<video>/` i frame con le box della classe escooter disegnate; i modelli di default sono in `MODELLI_DEFAULT` o si indicano con `--model NOME=PESI[:CLASSE[:IMGSZ]]`. |
+| `make_coco_subset.py` | Sceglie un sottoinsieme di COCO (formato YOLO) per classi (nomi, indici o preset `traffic`) e numero massimo di immagini, con quote per classe dalla più rara (le rare si prendono intere, le frequenti si tagliano); tiene tutte le etichette delle immagini scelte. Scrive la lista dei percorsi (per `build_coco_merged_lists.py --coco-train-list`) e un CSV per classe. |
+| `snapshot_checkpoints.py` | Copia `last.pt` di una run Ultralytics in corso ogni N epoche, per poterne rivalutare a posteriori le metriche alle epoche intermedie. |
 | `train_yolo.py` | Avvia un training Ultralytics YOLO su un dataset train/valid, con filtro/remap opzionale delle classi (`--classes`). |
 | `train_yolo26n_baseline.sh` | Baseline sullo split di `union_reviewed_coco` (yolo26n, solo escooter, imgsz 640, batch 16, nessun freeze); risultati in [VALUTAZIONI.md](VALUTAZIONI.md). |
 | `train_yolo26n_imgsz960.sh` | Come la baseline ma con imgsz 960 e batch 8 (limite di memoria della GPU), per l'esperimento sugli oggetti piccoli. |
@@ -692,3 +701,9 @@ default, formato dei file — vedi la docstring in cima a ciascuno script.
 | `train_yolon_ultralytics_scooter_1.sh` | Training del nano (yolo26n) da zero sul dataset Ultralytics Platform `scooter-detectyolov8`, senza il pool Roboflow. |
 | `train_yolos_1.sh` | Training di riferimento dello small (yolo26s) monoclasse sul pool attuale. |
 | `train_yolos_mined_1.sh` | Come `train_yolos_1.sh`, sullo split con le candidate del mining aggiunte al train (v. `build_split_mined.sh`). |
+
+### `scripts/` (condiviso)
+
+| Script | Descrizione |
+|---|---|
+| `config.py` | Libreria di configurazione centralizzata: legge `scripts/.env` ed espone le costanti usate dagli altri script; non eseguibile direttamente. |

@@ -21,7 +21,7 @@ Nel repo vanno README, `args.yaml`, `results.csv`, `results.png`, le matrici di 
 A training concluso, dalla radice del repo:
 
 ```
-python3 scripts/export_milestone.py --run runs/detect/data/runs/<run> --name <nome> \
+python3 scripts/training/export_milestone.py --run runs/detect/data/runs/<run> --name <nome> \
     --eval-report data/tmp/eval_<...>.json
 ```
 
