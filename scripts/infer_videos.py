@@ -40,6 +40,8 @@ MODELLI_DEFAULT = [
     f"imgsz960_26n={RUNS}/imgsz960_26n_escooter/weights/best.pt:0:960",
     f"multiclass81_26n={RUNS}/multiclass81_26n/weights/best.pt:80",
     f"multiclass_11n={RUNS}/multiclass_11n/weights/best.pt:3",
+    "coco_escooter_yolo26n_1=models/coco_escooter_yolo26n_1/weights/best.pt:80",
+    "coco_escooter_yolo11n_bt=models/coco_escooter_yolo11n_bt/weights/best.pt:80",
 ]
 
 
