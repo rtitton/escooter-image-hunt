@@ -24,6 +24,7 @@ Avvio:
     python3 scripts/training/make_coco_subset.py --coco-dir data/coco --split train2017
         --classes traffic --max-images 30000 --out-list data/processed/coco_subset_traffic/train.txt
         [--report ...csv] [--min-per-class K] [--seed 42]
+  Senza --min-per-class mostra le frequenze delle classi scelte e chiede K (invio = 0).
 """
 import argparse
 import csv
@@ -40,8 +41,7 @@ from split_dataset import CLASS_NAMES
 COCO_NAMES = CLASS_NAMES[:80]  # nell'ordine di coco.yaml di Ultralytics
 PRESETS = {
     "traffic": ["person", "bicycle", "car", "motorcycle", "bus", "train", "truck", "traffic light",
-                "fire hydrant", "stop sign", "parking meter", "bench", "backpack", "umbrella", "handbag",
-                "suitcase", "skateboard"],
+                "fire hydrant", "stop sign", "parking meter", "bench", "skateboard"],
 }
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
@@ -74,14 +74,40 @@ def read_counts(label_file: Path) -> dict:
     return counts
 
 
+def ask_min_per_class(classes: list, by_class: dict, counts: dict, max_images: int) -> int:
+    """Stampa le frequenze delle classi scelte (immagini e istanze nello split) e chiede K, il minimo di
+    immagini per classe. Invio = 0. Senza terminale interattivo usa 0 senza chiedere."""
+    print(f"\nFrequenze nello split delle {len(classes)} classi scelte (dalla più frequente):")
+    print(f"  {'classe':15s} {'immagini':>9s} {'istanze':>9s}")
+    for c in sorted(classes, key=lambda c: -len(by_class[c])):
+        n_inst = sum(counts[s][c] for s in by_class[c])
+        print(f"  {COCO_NAMES[c]:15s} {len(by_class[c]):9d} {n_inst:9d}")
+    quota = math.ceil(max_images / len(classes))
+    print(f"\nQuota media con --max-images {max_images}: circa {quota} immagini per classe; le classi con meno "
+          "immagini le prendono tutte.")
+    print("K = minimo di immagini per classe anche oltre --max-images (0 = nessun minimo: il subset non "
+          "supera mai --max-images).")
+    if not sys.stdin.isatty():
+        print("Terminale non interattivo: uso K = 0 (per cambiarlo, --min-per-class).")
+        return 0
+    while True:
+        answer = input("K [default 0]: ").strip()
+        if not answer:
+            return 0
+        if answer.isdigit():
+            return int(answer)
+        print("Inserire un intero >= 0 (o invio per 0).")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--coco-dir", type=Path, required=True, help="COCO in formato YOLO (images/ e labels/)")
     parser.add_argument("--split", default="train2017", help="train2017 (default) o val2017")
     parser.add_argument("--classes", nargs="+", required=True, help="Nomi COCO, indici o preset (traffic)")
     parser.add_argument("--max-images", type=int, required=True, help="Numero massimo di immagini del subset")
-    parser.add_argument("--min-per-class", type=int, default=0,
-                         help="Minimo di immagini per classe, anche oltre il budget (default: 0)")
+    parser.add_argument("--min-per-class", type=int, default=None,
+                         help="Minimo di immagini per classe, anche oltre il budget (default 0). Se omesso, "
+                              "lo script mostra le frequenze delle classi scelte e lo chiede")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-list", type=Path, required=True)
     parser.add_argument("--report", type=Path, default=None, help="CSV per classe (default: accanto alla lista)")
@@ -100,15 +126,19 @@ def main():
     ext = {p.stem: p.suffix for p in images_dir.iterdir() if p.suffix.lower() in IMAGE_EXTENSIONS}
     by_class = {c: [s for s in stems if c in counts[s]] for c in classes}
 
+    min_per_class = args.min_per_class
+    if min_per_class is None:
+        min_per_class = ask_min_per_class(classes, by_class, counts, args.max_images)
+
     rng = random.Random(args.seed)
     selected = set()
     for i, c in enumerate(sorted(classes, key=lambda c: (len(by_class[c]), c))):
         remaining_classes = len(classes) - i
         quota = math.ceil(max(args.max_images - len(selected), 0) / remaining_classes)
-        quota = max(quota, args.min_per_class - sum(1 for s in by_class[c] if s in selected))
+        quota = max(quota, min_per_class - sum(1 for s in by_class[c] if s in selected))
         new = [s for s in by_class[c] if s not in selected]
         selected.update(rng.sample(new, min(max(quota, 0), len(new))))
-    if args.min_per_class == 0 and len(selected) > args.max_images:
+    if min_per_class == 0 and len(selected) > args.max_images:
         raise SystemExit("Errore interno: superato il budget")
 
     paths = sorted(os.path.abspath(images_dir / f"{s}{ext[s]}") for s in selected)
