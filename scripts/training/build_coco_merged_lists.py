@@ -28,7 +28,7 @@ merge sarebbe sbagliato.
 
 Avvio:
     python3 scripts/training/build_coco_merged_lists.py --coco-dir DIR --split-dir DIR
-        --out-dir DIR [--repeat N] [--coco-train-list LISTA]
+        --out-dir DIR [--repeat N] [--subset-dir DIR]
 """
 import argparse
 import os
@@ -38,6 +38,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../dataset")))  # moduli di scripts/dataset/
 from split_dataset import CLASS_NAMES
+from make_coco_subset import write_filtered_dataset
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 SANITY_SAMPLE = 300  # label di COCO controllati per verificare che gli indici siano 0-79
@@ -85,6 +86,10 @@ def check_coco_labels(images: list, seed: int = 0) -> None:
     print(f"  controllo label COCO: {found}/{len(sample)} del campione hanno un file, classe massima {max_cls}")
 
 
+def read_list(path: Path) -> list:
+    return [l for l in path.read_text().splitlines() if l.strip()]
+
+
 def write_lines(path: Path, lines: list) -> None:
     path.write_text("\n".join(lines) + "\n")
 
@@ -94,19 +99,21 @@ def main():
     parser.add_argument("--coco-dir", type=Path, required=True, help="COCO in formato YOLO (images/ e labels/)")
     parser.add_argument("--split-dir", type=Path, required=True, help="Il nostro split (output di split_dataset.py)")
     parser.add_argument("--out-dir", type=Path, required=True, help="Dove scrivere train.txt, val.txt, data.yaml")
-    parser.add_argument("--coco-train-list", type=Path, default=None,
-                         help="Lista di percorsi (es. da make_coco_subset.py) da usare al posto di tutto train2017")
+    parser.add_argument("--subset-dir", type=Path, default=None,
+                         help="Subset di COCO (output di make_coco_subset.py: train.txt, val.txt, classes.txt) al "
+                              "posto di tutto COCO; il nostro valid viene filtrato sulle sue stesse classi")
     parser.add_argument("--repeat", type=int, default=1,
                          help="Quante volte inserire le nostre immagini di train (default: 1)")
     args = parser.parse_args()
     if args.repeat < 1:
         raise SystemExit("--repeat deve essere almeno 1")
 
-    if args.coco_train_list:
-        coco_train = [l for l in args.coco_train_list.read_text().splitlines() if l.strip()]
+    if args.subset_dir:
+        coco_train = read_list(args.subset_dir / "train.txt")
+        coco_val = read_list(args.subset_dir / "val.txt")
     else:
         coco_train = list_images(args.coco_dir / "images" / "train2017")
-    coco_val = list_images(args.coco_dir / "images" / "val2017")
+        coco_val = list_images(args.coco_dir / "images" / "val2017")
     our_train = list_images(args.split_dir / "train" / "images")
     our_valid = list_images(args.split_dir / "valid" / "images")
     print(f"COCO: {len(coco_train)} train, {len(coco_val)} val; nostro split: {len(our_train)} train, {len(our_valid)} valid")
@@ -114,6 +121,21 @@ def main():
 
     out_dir = args.out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
+    if args.subset_dir:
+        # Con un subset le etichette sono filtrate sulle classi scelte più la escooter (80): lo stesso va fatto
+        # sul nostro train e valid, altrimenti le classi sacrificate resterebbero annotate solo nelle nostre
+        # immagini. Copie in out_dir/{train,valid}_filtered (symlink alle immagini, label filtrati).
+        keep = {int(l) for l in (args.subset_dir / "classes.txt").read_text().split()} | {len(CLASS_NAMES) - 1}
+        for name in ("train", "valid"):
+            images = our_train if name == "train" else our_valid
+            pairs = [(Path(p), Path(label_path(p))) for p in images]
+            n = write_filtered_dataset(pairs, out_dir / f"{name}_filtered", keep)
+            filtered = list_images(out_dir / f"{name}_filtered" / "images")
+            print(f"  nostro {name} filtrato sulle classi del subset: {n}/{len(pairs)} immagini")
+            if name == "train":
+                our_train = filtered
+            else:
+                our_valid = filtered
     train = coco_train + our_train * args.repeat
     val = coco_val + our_valid
     write_lines(out_dir / "train.txt", train)

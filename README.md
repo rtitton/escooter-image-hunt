@@ -56,7 +56,7 @@ scripts/training/download_coco.sh
 
 # subset di COCO per classi e numero massimo di immagini (opzionale)
 python3 scripts/training/make_coco_subset.py --coco-dir data/coco --classes traffic \
-    --max-images 30000 --out-list data/processed/coco_subset_traffic_30k/train.txt
+    --max-images 30000 --out-dir data/processed/coco_subset_30000
 
 # training COCO + nostro split (nostre immagini ripetute REPEAT volte)
 REPEAT=5 scripts/training/train_yolo26_coco_escooter.sh

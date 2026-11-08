@@ -21,6 +21,7 @@
 #   YOLO_MODEL   pesi di partenza (default yolo26n.pt)
 #   EPOCHS (150), BATCH (32), WORKERS (16: sulla H100 il collo di bottiglia è la CPU), FREEZE (0)
 #   NAME         nome della run (default coco_escooter_<modello>_rep<REPEAT>)
+#   COCO_SUBSET_DIR  cartella del subset di COCO (output di make_coco_subset.sh) al posto di tutto COCO
 #   BUILD_LISTS  1 = rigenera liste e data.yaml prima del training (default); 0 = riusa quelli in OUT_DIR
 #   RESUME       1 = riprende la run interrotta chiamata NAME (da last.pt, v. sotto); non rigenera le liste
 #
@@ -45,6 +46,7 @@ WORKERS="${WORKERS:-16}"
 FREEZE="${FREEZE:-0}"
 NAME="${NAME:-coco_escooter_${YOLO_MODEL%.pt}_rep${REPEAT}}"  # senza ".pt" nel nome
 BUILD_LISTS="${BUILD_LISTS:-1}"
+COCO_SUBSET_DIR="${COCO_SUBSET_DIR:-}"  # subset di COCO (make_coco_subset.sh); vuoto = tutto COCO
 RESUME="${RESUME:-0}"
 
 if [[ "$RESUME" != "0" && "$RESUME" != "1" ]]; then
@@ -55,11 +57,14 @@ fi
 # Liste e data.yaml: si rigenerano a ogni run (con REPEAT diverso cambiano), non quando si riprende una run
 # (i dati devono restare quelli della run originale).
 if [[ "$RESUME" == "0" && "$BUILD_LISTS" == "1" ]]; then
+  LIST_ARGS=()
+  [[ -n "$COCO_SUBSET_DIR" ]] && LIST_ARGS+=(--subset-dir "$COCO_SUBSET_DIR")
   uv run python3 scripts/training/build_coco_merged_lists.py \
     --coco-dir "$COCO_DIR" \
     --split-dir "$SPLIT_DIR" \
     --out-dir "$OUT_DIR" \
-    --repeat "$REPEAT"
+    --repeat "$REPEAT" \
+    ${LIST_ARGS[@]+"${LIST_ARGS[@]}"}
 fi
 
 TRAIN_ARGS=(
