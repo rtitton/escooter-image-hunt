@@ -28,7 +28,7 @@ merge sarebbe sbagliato.
 
 Avvio:
     python3 scripts/build_coco_merged_lists.py --coco-dir DIR --split-dir DIR
-        --out-dir DIR [--repeat N]
+        --out-dir DIR [--repeat N] [--coco-train-list LISTA]
 """
 import argparse
 import os
@@ -92,13 +92,18 @@ def main():
     parser.add_argument("--coco-dir", type=Path, required=True, help="COCO in formato YOLO (images/ e labels/)")
     parser.add_argument("--split-dir", type=Path, required=True, help="Il nostro split (output di split_dataset.py)")
     parser.add_argument("--out-dir", type=Path, required=True, help="Dove scrivere train.txt, val.txt, data.yaml")
+    parser.add_argument("--coco-train-list", type=Path, default=None,
+                         help="Lista di percorsi (es. da make_coco_subset.py) da usare al posto di tutto train2017")
     parser.add_argument("--repeat", type=int, default=1,
                          help="Quante volte inserire le nostre immagini di train (default: 1)")
     args = parser.parse_args()
     if args.repeat < 1:
         raise SystemExit("--repeat deve essere almeno 1")
 
-    coco_train = list_images(args.coco_dir / "images" / "train2017")
+    if args.coco_train_list:
+        coco_train = [l for l in args.coco_train_list.read_text().splitlines() if l.strip()]
+    else:
+        coco_train = list_images(args.coco_dir / "images" / "train2017")
     coco_val = list_images(args.coco_dir / "images" / "val2017")
     our_train = list_images(args.split_dir / "train" / "images")
     our_valid = list_images(args.split_dir / "valid" / "images")
