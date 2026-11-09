@@ -24,7 +24,7 @@ Etichette filtrate
   ciascuno, a images/train2017 e images/val2017 di COCO), con accanto i label filtrati in .../labels. Le
   immagini originali non si toccano. Per avere una copia fisica: scripts/training/materialize_dataset.py.
 
-Uscita, in --out-dir
+Uscita, in --out-dir con _<max-images>_<min-per-class> aggiunto al nome (es. coco_subset -> coco_subset_30000_0)
   train.txt, val.txt   percorsi delle immagini (via i symlink di train/ e val/)
   data.yaml            80 classi COCO (indici invariati), train.txt e val.txt
   classes.txt          gli indici delle classi scelte (li usa build_coco_merged_lists.py per filtrare allo
@@ -37,7 +37,7 @@ Uscita, in --out-dir
 
 Avvio:
     python3 scripts/training/make_coco_subset.py --coco-dir data/coco --classes traffic --max-images 30000
-        --out-dir data/processed/coco_subset_30000 [--min-per-class K] [--seed 42]
+        --out-dir data/processed/coco_subset [--min-per-class K] [--seed 42]
   Senza --min-per-class mostra le frequenze delle classi scelte e chiede K (invio = 0).
 """
 import argparse
@@ -146,7 +146,7 @@ def main():
                          help="Minimo di immagini per classe, anche oltre il budget (default 0). Se omesso, "
                               "lo script mostra le frequenze delle classi scelte e lo chiede")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--out-dir", type=Path, required=True, help="Dove scrivere train.txt, val.txt, ecc.")
+    parser.add_argument("--out-dir", type=Path, required=True, help="Dove scrivere train.txt, val.txt, ecc.; al nome si aggiunge _<max-images>_<min-per-class>")
     args = parser.parse_args()
 
     classes = parse_classes(args.classes)
@@ -165,6 +165,8 @@ def main():
     min_per_class = args.min_per_class
     if min_per_class is None:
         min_per_class = ask_min_per_class(classes, by_class, counts, args.max_images)
+    args.out_dir = args.out_dir.with_name(f"{args.out_dir.name}_{args.max_images}_{min_per_class}")
+    print(f"Cartella di uscita: {args.out_dir}")
 
     rng = random.Random(args.seed)
     selected = set()
@@ -192,11 +194,13 @@ def main():
             w.writerow([c, COCO_NAMES[c], int(c in classes), len(before), len(after),
                         sum(counts[s][c] for s in before), sum(counts[s][c] for s in after)])
     print(f"{len(selected)} immagini su {len(stems)} -> {args.out_dir / 'train.txt'}")
-    print("Per classe scelta (immagini dopo/prima):")
+    print("Per classe scelta (dopo / prima il taglio):")
+    print(f"  {'classe':15s} {'immagini':>17s} {'istanze':>19s}")
     for c in classes:
-        n_before = len(by_class[c])
-        n_after = sum(1 for s in by_class[c] if s in selected)
-        print(f"  {COCO_NAMES[c]:15s} {n_after:6d} / {n_before}")
+        kept = [s for s in by_class[c] if s in selected]
+        inst_before = sum(counts[s][c] for s in by_class[c])
+        inst_after = sum(counts[s][c] for s in kept)
+        print(f"  {COCO_NAMES[c]:15s} {len(kept):7d} / {len(by_class[c]):7d} {inst_after:9d} / {inst_before:7d}")
     print(f"Report: {report}")
 
     # Val: stesse classi, da val2017, con i label filtrati (v. docstring)

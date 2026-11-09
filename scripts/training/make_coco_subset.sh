@@ -5,13 +5,14 @@
 #   MAX_IMAGES      numero massimo di immagini (30000)
 #   MIN_PER_CLASS   minimo di immagini per classe; se non impostato, lo script mostra le frequenze e lo chiede
 #   SEED            seme (42)
-#   OUT_DIR         dove scrivere train.txt, val.txt, ecc. (data/processed/coco_subset_<MAX_IMAGES>)
+#   OUT_DIR         dove scrivere train.txt, val.txt, ecc. (data/processed/coco_subset; lo script aggiunge
+#                   _<MAX_IMAGES>_<MIN_PER_CLASS> al nome, es. data/processed/coco_subset_30000_0)
 #
 # Avvio (dalla radice del repo):
 #   scripts/training/make_coco_subset.sh
 #   MAX_IMAGES=20000 CLASSES="car truck bus" scripts/training/make_coco_subset.sh
-# Il subset si passa poi a build_coco_merged_lists.py con --subset-dir <OUT_DIR> (o a
-# train_yolo26_coco_escooter.sh con COCO_SUBSET_DIR=<OUT_DIR>).
+# Il subset si passa poi a build_coco_merged_lists.py con --subset-dir <OUT_DIR>_<MAX_IMAGES>_<MIN_PER_CLASS> (o a
+# train_yolo26_coco_escooter.sh con COCO_SUBSET_DIR=<OUT_DIR>_<MAX_IMAGES>_<MIN_PER_CLASS>).
 set -e
 cd "$(dirname "$0")/../.."
 
@@ -19,7 +20,7 @@ COCO_DIR="${COCO_DIR:-data/coco}"
 CLASSES="${CLASSES:-traffic}"
 MAX_IMAGES="${MAX_IMAGES:-30000}"
 SEED="${SEED:-42}"
-OUT_DIR="${OUT_DIR:-data/processed/coco_subset_${MAX_IMAGES}}"
+OUT_DIR="${OUT_DIR:-data/processed/coco_subset}"  # make_coco_subset.py aggiunge _<MAX_IMAGES>_<MIN_PER_CLASS>
 
 ARGS=(--coco-dir "$COCO_DIR" --max-images "$MAX_IMAGES" --seed "$SEED" --out-dir "$OUT_DIR")
 [ -n "${MIN_PER_CLASS:-}" ] && ARGS+=(--min-per-class "$MIN_PER_CLASS")
