@@ -20,15 +20,17 @@ Validation
 
 Etichette filtrate
   Ultralytics ricava i label dal percorso dell'immagine (/images/ -> /labels/), quindi le liste puntano a
-  symlink in <out-dir>/train_filtered/images e <out-dir>/val_filtered/images, con accanto i label filtrati in
-  .../labels. Le immagini originali non si toccano.
+  percorsi che passano da <out-dir>/train/images e <out-dir>/val/images (un solo symlink
+  ciascuno, a images/train2017 e images/val2017 di COCO), con accanto i label filtrati in .../labels. Le
+  immagini originali non si toccano. Per avere una copia fisica: scripts/training/materialize_dataset.py.
 
 Uscita, in --out-dir
-  train.txt, val.txt   percorsi delle immagini (symlink in train_filtered/ e val_filtered/)
+  train.txt, val.txt   percorsi delle immagini (via i symlink di train/ e val/)
+  data.yaml            80 classi COCO (indici invariati), train.txt e val.txt
   classes.txt          gli indici delle classi scelte (li usa build_coco_merged_lists.py per filtrare allo
                        stesso modo il nostro valid)
   train.csv            per ogni classe COCO, immagini e istanze prima e dopo il taglio (train)
-  Si passa a build_coco_merged_lists.py con --subset-dir. Ad ogni esecuzione le cartelle *_filtered/ sono
+  Si passa a build_coco_merged_lists.py con --subset-dir. Ad ogni esecuzione le cartelle train/ e val/ sono
   rigenerate.
 
 --classes accetta nomi COCO o indici, e il preset "traffic".
@@ -112,22 +114,27 @@ def ask_min_per_class(classes: list, by_class: dict, counts: dict, max_images: i
         print("Inserire un intero >= 0 (o invio per 0).")
 
 
-def write_filtered_dataset(pairs: list, out_dir: Path, keep: set) -> int:
-    """Scrive in out_dir/images (symlink) e out_dir/labels le coppie (immagine, file di label) con le sole righe
-    delle classi in keep; le immagini senza nessuna riga restante sono saltate. Ritorna quante ne scrive."""
-    for sub in ("images", "labels"):
-        shutil.rmtree(out_dir / sub, ignore_errors=True)
-        (out_dir / sub).mkdir(parents=True)
-    n = 0
+def write_filtered_dataset(pairs: list, source_images: Path, out_dir: Path, keep: set) -> list:
+    """Scrive in out_dir/labels i label delle coppie (immagine, file di label) con le sole righe delle classi in
+    keep; le immagini senza nessuna riga restante sono saltate. out_dir/images è un solo symlink alla cartella
+    delle immagini originali (source_images). Ritorna i percorsi delle immagini scritte, passando da out_dir/images."""
+    images_link = out_dir / "images"
+    if images_link.is_symlink():
+        images_link.unlink()
+    else:
+        shutil.rmtree(images_link, ignore_errors=True)  # versioni precedenti: cartella di symlink per file
+    shutil.rmtree(out_dir / "labels", ignore_errors=True)
+    (out_dir / "labels").mkdir(parents=True)
+    images_link.symlink_to(os.path.abspath(source_images))
+    paths = []
     for image, label in pairs:
         lines = [l for l in (label.read_text().splitlines() if label.exists() else [])
                  if l.split() and int(float(l.split()[0])) in keep]
         if not lines:
             continue
-        (out_dir / "images" / image.name).symlink_to(os.path.abspath(image))
         (out_dir / "labels" / f"{image.stem}.txt").write_text("\n".join(lines) + "\n")
-        n += 1
-    return n
+        paths.append(os.path.abspath(images_link / image.name))
+    return paths
 
 
 def main():
@@ -172,8 +179,7 @@ def main():
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     train_pairs = [(images_dir / f"{s}{ext[s]}", labels_dir / f"{s}.txt") for s in sorted(selected)]
-    write_filtered_dataset(train_pairs, args.out_dir / "train_filtered", set(classes))
-    paths = sorted(os.path.abspath(p) for p in (args.out_dir / "train_filtered" / "images").iterdir())
+    paths = sorted(write_filtered_dataset(train_pairs, images_dir, args.out_dir / "train", set(classes)))
     (args.out_dir / "train.txt").write_text("\n".join(paths) + "\n")
 
     report = args.out_dir / "train.csv"
@@ -198,10 +204,13 @@ def main():
     val_labels = args.coco_dir / "labels" / "val2017"
     pairs = [(p, val_labels / f"{p.stem}.txt") for p in sorted(val_images.iterdir())
              if p.suffix.lower() in IMAGE_EXTENSIONS]
-    n = write_filtered_dataset(pairs, args.out_dir / "val_filtered", set(classes))
-    val_paths = sorted(os.path.abspath(p) for p in (args.out_dir / "val_filtered" / "images").iterdir())
+    val_paths = sorted(write_filtered_dataset(pairs, val_images, args.out_dir / "val", set(classes)))
+    n = len(val_paths)
     (args.out_dir / "val.txt").write_text("\n".join(val_paths) + "\n")
     (args.out_dir / "classes.txt").write_text("\n".join(map(str, classes)) + "\n")
+    (args.out_dir / "data.yaml").write_text("\n".join(
+        ["train: train.txt", "val: val.txt", f"nc: {len(COCO_NAMES)}", "names:"]
+        + [f"  {i}: {n}" for i, n in enumerate(COCO_NAMES)]) + "\n")
     print(f"Val: {n} immagini su {len(pairs)} di val2017 -> {args.out_dir / 'val.txt'}")
 
 

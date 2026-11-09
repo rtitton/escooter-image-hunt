@@ -124,13 +124,14 @@ def main():
     if args.subset_dir:
         # Con un subset le etichette sono filtrate sulle classi scelte più la escooter (80): lo stesso va fatto
         # sul nostro train e valid, altrimenti le classi sacrificate resterebbero annotate solo nelle nostre
-        # immagini. Copie in out_dir/{train,valid}_filtered (symlink alle immagini, label filtrati).
+        # immagini. In out_dir/our_{train,valid}: un symlink alle immagini e i label filtrati.
         keep = {int(l) for l in (args.subset_dir / "classes.txt").read_text().split()} | {len(CLASS_NAMES) - 1}
         for name in ("train", "valid"):
             images = our_train if name == "train" else our_valid
             pairs = [(Path(p), Path(label_path(p))) for p in images]
-            n = write_filtered_dataset(pairs, out_dir / f"{name}_filtered", keep)
-            filtered = list_images(out_dir / f"{name}_filtered" / "images")
+            source = args.split_dir / name / "images"
+            filtered = sorted(write_filtered_dataset(pairs, source, out_dir / f"our_{name}", keep))
+            n = len(filtered)
             print(f"  nostro {name} filtrato sulle classi del subset: {n}/{len(pairs)} immagini")
             if name == "train":
                 our_train = filtered
