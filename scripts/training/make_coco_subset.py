@@ -194,6 +194,9 @@ def main():
             w.writerow([c, COCO_NAMES[c], int(c in classes), len(before), len(after),
                         sum(counts[s][c] for s in before), sum(counts[s][c] for s in after)])
     print(f"{len(selected)} immagini su {len(stems)} -> {args.out_dir / 'train.txt'}")
+    if len(selected) > args.max_images:
+        print(f"ATTENZIONE: {len(selected)} immagini, oltre --max-images {args.max_images}: "
+              f"--min-per-class {min_per_class} ha portato le classi al minimo anche oltre il budget.")
     print("Per classe scelta (dopo / prima il taglio):")
     print(f"  {'classe':15s} {'immagini':>17s} {'istanze':>19s}")
     for c in classes:
