@@ -61,6 +61,10 @@ python3 scripts/training/make_coco_subset.py --coco-dir data/coco --classes traf
 # training COCO + nostro split (nostre immagini ripetute REPEAT volte)
 REPEAT=5 scripts/training/train_yolo26_coco_escooter.sh
 
+# statistiche del dataset (ordinamento: frequency, id, name; CSV opzionale)
+python3 scripts/training/dataset_stats.py data/processed/coco_escooter_merge_rep5/data.yaml \
+    --sort frequency --csv statistiche.csv
+
 # baseline solo escooter
 scripts/training/train_yolo26n_baseline.sh
 
