@@ -12,7 +12,7 @@
 #   scripts/training/make_coco_subset.sh
 #   MAX_IMAGES=20000 CLASSES="car truck bus" scripts/training/make_coco_subset.sh
 # Il subset si passa poi a build_coco_merged_lists.py con --subset-dir <OUT_DIR>_<MAX_IMAGES>_<MIN_PER_CLASS> (o a
-# train_yolo26_coco_escooter.sh con COCO_SUBSET_DIR=<OUT_DIR>_<MAX_IMAGES>_<MIN_PER_CLASS>).
+# build_coco_merged_lists.sh con COCO_SUBSET_DIR=<OUT_DIR>_<MAX_IMAGES>_<MIN_PER_CLASS>).
 set -e
 cd "$(dirname "$0")/../.."
 

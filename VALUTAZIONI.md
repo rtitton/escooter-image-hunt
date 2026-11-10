@@ -261,7 +261,7 @@ Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si c
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
-1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/training/train_yolo26_coco_escooter.sh` lo script rigenera le liste in una cartella dedicata (`coco_escooter_merge_rep5`).
+1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/training/build_coco_merged_lists.sh` si costruiscono le liste in una cartella dedicata (`coco_escooter_merge_rep5`), poi `DATA_YAML=data/processed/coco_escooter_merge_rep5/data.yaml scripts/training/train_yolo26_coco_escooter.sh`.
 1b. Training multiclasse con poche classi correlate (person, bicycle, motorcycle, escooter) su yolo26n e sul nuovo split, per replicare il guadagno sulle piccole di `multiclass_11n`: il multiclasse a 81 classi non lo ha dato (v. sezione 6).
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.

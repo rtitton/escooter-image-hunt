@@ -58,8 +58,11 @@ scripts/training/download_coco.sh
 python3 scripts/training/make_coco_subset.py --coco-dir data/coco --classes traffic \
     --max-images 30000 --out-dir data/processed/coco_subset_30000
 
-# training COCO + nostro split (nostre immagini ripetute REPEAT volte)
-REPEAT=5 scripts/training/train_yolo26_coco_escooter.sh
+# liste e data.yaml di COCO (o del subset, COCO_SUBSET_DIR=...) + nostro split (nostre immagini ripetute REPEAT volte)
+REPEAT=5 scripts/training/build_coco_merged_lists.sh
+
+# training sul dataset così costruito
+DATA_YAML=data/processed/coco_escooter_merge_rep5/data.yaml scripts/training/train_yolo26_coco_escooter.sh
 
 # statistiche del dataset (ordinamento: frequency, id, name; CSV opzionale)
 python3 scripts/training/dataset_stats.py data/processed/coco_escooter_merge_rep5/data.yaml \
