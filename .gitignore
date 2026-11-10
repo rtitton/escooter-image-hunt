@@ -8,7 +8,7 @@ __pycache__/
 pyproject.toml
 uv.lock
 tmp/
-# inferences/: frame con le box dei modelli e fogli di confronto (infer_videos.py, contact_sheets.py): output
+# inferences/: frame con le box dei modelli e fogli di confronto (infer_videos.py, infer_contact_sheets.py): output
 # generati e pesanti (~120 MB), restano fuori dal repo; nel repo solo il README
 inferences/*
 !inferences/README.md

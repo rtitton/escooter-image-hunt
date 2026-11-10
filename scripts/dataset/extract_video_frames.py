@@ -7,6 +7,8 @@ indipendente dai dataset Roboflow: le immagini sono salvate senza label in
 <out-dir>/images/, con nome <video>_f<indice-frame>_t<secondi>.jpg.
 
     python3 scripts/dataset/extract_video_frames.py /mnt/x/media
+    python3 scripts/dataset/extract_video_frames.py /mnt/x/media/test \\
+        --every-n-frames 10 --out-dir data/processed/video_testset_2
 
 Ad ogni esecuzione la cartella di output viene svuotata e ripopolata.
 """
@@ -25,7 +27,7 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
 JPEG_QUALITY = 95
 
 
-def extract_frames(video: Path, out_images: Path, fps_out: float) -> int:
+def extract_frames(video: Path, out_images: Path, fps_out: float, every_n: int = 0) -> int:
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise SystemExit(f"impossibile aprire {video}")
@@ -33,7 +35,8 @@ def extract_frames(video: Path, out_images: Path, fps_out: float) -> int:
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if fps <= 0:
         raise SystemExit(f"{video}: FPS non valido ({fps})")
-    step = fps / fps_out  # in frame sorgente tra due estrazioni (non intero in generale)
+    # in frame sorgente tra due estrazioni (non intero in generale); con every_n un frame ogni N
+    step = float(every_n) if every_n > 0 else fps / fps_out
     saved = 0
     idx = 0
     next_frame = 0.0
@@ -57,6 +60,8 @@ def main():
     ap.add_argument("video_dir", type=Path, help="cartella con i video")
     ap.add_argument("--out-dir", type=Path, default=config.VIDEO_TESTSET_DIR)
     ap.add_argument("--fps", type=float, default=config.VIDEO_TESTSET_FPS, help="frame estratti per secondo")
+    ap.add_argument("--every-n-frames", type=int, default=0, metavar="N",
+                    help="estrae un frame ogni N frame del video (ha la precedenza su --fps)")
     args = ap.parse_args()
 
     videos = sorted(p for p in args.video_dir.iterdir() if p.suffix.lower() in VIDEO_EXTENSIONS)
@@ -68,7 +73,7 @@ def main():
     out_images = args.out_dir / "images"
     out_images.mkdir(parents=True)
 
-    total = sum(extract_frames(v, out_images, args.fps) for v in videos)
+    total = sum(extract_frames(v, out_images, args.fps, args.every_n_frames) for v in videos)
     print(f"totale: {total} immagini in {out_images}")
 
 

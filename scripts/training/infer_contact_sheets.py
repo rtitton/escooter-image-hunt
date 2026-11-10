@@ -25,7 +25,7 @@ QUALI MODELLI
   da sinistra a destra e riga per riga.
 
 COME SI AVVIA (dalla radice del repo, dopo infer_videos.py)
-    python3 scripts/training/contact_sheets.py [--src inferences] [--out-dir inferences/_confronto]
+    python3 scripts/training/infer_contact_sheets.py [--src inferences] [--out-dir inferences/_confronto]
         [--models NOME ...] [--cols 3] [--tile-width 640]
   Ad ogni esecuzione la cartella di output viene cancellata e rigenerata da zero.
 

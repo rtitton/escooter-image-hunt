@@ -9,4 +9,4 @@ inferences/
 ```
 
 - `python3 scripts/training/infer_videos.py /mnt/x/media` produce le cartelle dei modelli: un frame ogni 10 del video (`--step`), soglia di confidenza 0,25 (`--conf`), modelli di default in `MODELLI_DEFAULT` o scelti con `--model NOME=PESI[:CLASSE[:IMGSZ]]` (ripetibile). Ad ogni esecuzione le cartelle dei modelli indicati vengono rigenerate.
-- `python3 scripts/training/contact_sheets.py` compone i fogli da tutte le cartelle dei modelli (`--models` per sceglierle e ordinarle, `--cols` per le colonne).
+- `python3 scripts/training/infer_contact_sheets.py` compone i fogli da tutte le cartelle dei modelli (`--models` per sceglierle e ordinarle, `--cols` per le colonne).

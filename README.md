@@ -76,7 +76,7 @@ python3 scripts/training/eval_testset.py --help
 
 # inferenza sui video e fogli di confronto fra modelli
 python3 scripts/training/infer_videos.py /mnt/x/media
-python3 scripts/training/contact_sheets.py
+python3 scripts/training/infer_contact_sheets.py
 
 # a run conclusa: copia in models/ come milestone
 python3 scripts/training/export_milestone.py --help
