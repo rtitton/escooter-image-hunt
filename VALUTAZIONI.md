@@ -1,6 +1,6 @@
 # Valutazioni sul dataset `union_reviewed_coco` e sui primi modelli
 
-Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e il 2 novembre 2026: qualità dello split, esito della seconda review, baseline yolo26n, test su due test set indipendenti ed esperimento con `imgsz` 960. Per la descrizione degli script vedi [PIPELINE.md](PIPELINE.md).
+Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novembre 2026: qualità dello split, esito della seconda review, baseline yolo26n, test su due test set indipendenti ed esperimento con `imgsz` 960. Per la descrizione degli script vedi [PIPELINE.md](PIPELINE.md).
 
 - [Sintesi](#sintesi)
 - [1. Dataset e split](#1-dataset-e-split)
@@ -21,6 +21,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e il 2 novemb
 - **Allenare a 960 aiuta poco** (video: mAP50 0,731 contro 0,726) e costa il doppio del tempo (7,1 ore contro 3,3). Usare la baseline a 960 *senza riaddestrarla* dà di più sul video (0,789) ma peggiora il kickboard (0,834). Nessuna delle due risoluzioni vince su entrambi i test set.
 - Il **multiclasse a 81 classi** (solo nostri dati) peggiora la escooter (video mAP50 0,553): le classi sono troppe e con pochi esempi (v. sezione 6).
 - **COCO + nostro split** (H100, yolo26n, nostre immagini ripetute una volta): classi COCO preservate (mAP50-95 globale 0,399), ma la escooter peggiora ancora (video mAP50 0,501 contro 0,726 della baseline), perché le nostre 1812 immagini sono circa l'1,5% del train. Rispetto a un vecchio yolo11n su COCO + un dataset Roboflow non curato, il 26n va meglio sul video e sul nostro valid (v. sezione 6; confronto non controllato).
+- **COCO + nostro split con immagini ripetute 5 volte**: video mAP50 0,530 (rep1: 0,501; baseline 0,726), valid 0,952, kickboard 0,960; migliora ma non trova ancora nessuna escooter piccola (v. sezione 6).
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -247,6 +248,22 @@ Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si c
 - **Cautela:** il confronto non è controllato. Cambiano architettura (26n contro 11n) e ricetta (batch, `multi_scale`, patience, seed), e non sappiamo se il vecchio dataset Roboflow si sovrapponga ai nostri sorgenti o ai test set: il vantaggio non si può attribuire alla sola cura del dataset.
 - Il nome della run del 26n (`coco_escooter_26s_rep1-16`, in `args.yaml`) dice 26s, ma il modello è yolo26n. L'`args.yaml` del 26n contiene inoltre `cls_remap: true`, argomento che non è nell'Ultralytics 8.4.126 usato qui.
 
+### COCO + nostro split, immagini ripetute 5 volte (yolo26n, H100)
+
+Run `coco_escooter_yolo26n_rep5` (milestone in `models/coco_escooter_yolo26n_rep5`): stessa ricetta di `coco_escooter_yolo26n_1` (150 epoche, batch 32, patience 20), ma con `coco_escooter_merge_rep5`, cioè le nostre immagini ripetute 5 volte. La run è stata interrotta all'epoca 93 e ripresa; Ultralytics ha scritto la seconda tranche in una cartella nuova, e nella milestone i due `results.csv` sono uniti. Non si è fermata per early stopping (migliore epoca = 150). Sul validation set della run (81 classi): P 0,662, R 0,499, mAP50 0,543, mAP50-95 0,390 (rep1: 0,560 / 0,399; i validation set non sono gli stessi). Valutata sulla sola escooter (`--class-index 80`, imgsz 640, GPU), mAP50 / mAP50-95:
+
+| Insieme | rep5 | rep1 | Baseline nostra (solo escooter) |
+|---|---|---|---|
+| Video | 0,530 / 0,365 | 0,501 / 0,320 | 0,726 / 0,502 |
+| Kickboard | 0,960 / 0,817 | 0,959 / 0,787 | 0,972 / 0,816 |
+| Nostro valid | 0,952 / 0,731 | 0,910 / 0,667 | 0,964 / 0,742 |
+
+Recall per taglia (rep5) sul video: piccole 0/86, medie 0,400 (rep1 0,331; baseline 0,738), grandi 0,674 (0,663; 0,859). Sul valid: piccole 0,143, medie 0,693, grandi 0,973.
+
+- Ripetere 5 volte le nostre immagini aiuta, soprattutto sul valid (+4 punti di mAP50) e sul video (+3), ma il modello resta molto sotto la baseline monoclasse sul video e non trova nessuna escooter piccola.
+- Sul kickboard (oggetti grandi) è alla pari con la baseline (mAP50-95 0,817 contro 0,816).
+- Non verificato: se le classi COCO siano rimaste a posto (`compare_coco_models.py` non ancora eseguito su questa run) e se un fattore di ripetizione più alto o l'aggiunta di esempi piccoli cambi il quadro.
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
@@ -261,7 +278,7 @@ Entrambi hanno 81 classi con la escooter all'indice 80 (nel vecchio modello si c
 ## 8. Prossimi passi
 
 1. Aggiungere esempi di escooter piccoli al train (nel train sono l'1,9% delle istanze), per esempio con immagini del tipo del video test set, e riallenare a 640 (circa 3 ore); valutare poi a 640 e a 800.
-1a. Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/training/build_coco_merged_lists.sh` si costruiscono le liste in una cartella dedicata (`coco_escooter_merge_rep5`), poi `DATA_YAML=data/processed/coco_escooter_merge_rep5/data.yaml scripts/training/train_yolo26_coco_escooter.sh`.
+1a. (Fatto con REPEAT=5, v. sezione 6: migliora ma non raggiunge la baseline; resta da verificare con `compare_coco_models.py` che le classi COCO siano a posto.) Rifare COCO + nostro split con le nostre immagini ripetute 3-5 volte (`REPEAT`), sempre senza `cls_pw`, e valutare la escooter come in sezione 6; verificare con `compare_coco_models.py` che le classi COCO restino a posto. Con `REPEAT=5 scripts/training/build_coco_merged_lists.sh` si costruiscono le liste in una cartella dedicata (`coco_escooter_merge_rep5`), poi `DATA_YAML=data/processed/coco_escooter_merge_rep5/data.yaml scripts/training/train_yolo26_coco_escooter.sh`.
 1b. Training multiclasse con poche classi correlate (person, bicycle, motorcycle, escooter) su yolo26n e sul nuovo split, per replicare il guadagno sulle piccole di `multiclass_11n`: il multiclasse a 81 classi non lo ha dato (v. sezione 6).
 2. Verificare a campione le box aggiunte che si sovrappongono ad altre o toccano il bordo, per vedere se alcune sono amodali (v. sezione 2).
 3. Se serve una validazione più affidabile, ampliare il valid con dataset che oggi non vi sono rappresentati.
