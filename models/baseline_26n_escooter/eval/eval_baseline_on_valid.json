@@ -1,0 +1,33 @@
+{
+  "runs/detect/data/runs/baseline_26n_escooter/weights/best.pt": {
+    "valid": {
+      "weights": "runs/detect/data/runs/baseline_26n_escooter/weights/best.pt",
+      "testset": "valid",
+      "precision": 0.9645,
+      "recall": 0.8974,
+      "mAP50": 0.9637,
+      "mAP50-95": 0.7417,
+      "size_breakdown": {
+        "recall_by_gt_size": {
+          "small": {
+            "tp": 11,
+            "fn": 3
+          },
+          "medium": {
+            "tp": 58,
+            "fn": 17
+          },
+          "large": {
+            "tp": 325,
+            "fn": 10
+          }
+        },
+        "false_positives_by_pred_size": {
+          "small": 4,
+          "medium": 15,
+          "large": 18
+        }
+      }
+    }
+  }
+}
