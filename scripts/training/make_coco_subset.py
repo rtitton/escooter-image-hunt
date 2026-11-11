@@ -29,7 +29,7 @@ Uscita, in --out-dir con _<max-images>_<min-per-class> aggiunto al nome (es. coc
   data.yaml            80 classi COCO (indici invariati), train.txt e val.txt
   classes.txt          gli indici delle classi scelte (li usa build_coco_merged_lists.py per filtrare allo
                        stesso modo il nostro valid)
-  train.csv            per ogni classe COCO, immagini e istanze prima e dopo il taglio (train)
+    train.csv, val.csv   per le classi scelte, conteggi e percentuali in COCO e nel subset
   Si passa a build_coco_merged_lists.py con --subset-dir. Ad ogni esecuzione le cartelle train/ e val/ sono
   rigenerate.
 
@@ -90,8 +90,7 @@ def read_counts(label_file: Path) -> dict:
 
 
 def ask_min_per_class(classes: list, by_class: dict, counts: dict, max_images: int) -> int:
-    """Stampa le frequenze delle classi scelte (immagini e istanze nello split) e chiede K, il minimo di
-    immagini per classe. Invio = 0. Senza terminale interattivo usa 0 senza chiedere."""
+    """Stampa le frequenze delle classi scelte e chiede K, il minimo di immagini per classe. Invio = 0."""
     print(f"\nFrequenze nello split delle {len(classes)} classi scelte (dalla più frequente):")
     print(f"  {'classe':15s} {'immagini':>9s} {'istanze':>9s}")
     for c in sorted(classes, key=lambda c: -len(by_class[c])):
@@ -135,6 +134,53 @@ def write_filtered_dataset(pairs: list, source_images: Path, out_dir: Path, keep
         (out_dir / "labels" / f"{image.stem}.txt").write_text("\n".join(lines) + "\n")
         paths.append(os.path.abspath(images_link / image.name))
     return paths
+
+
+def write_class_report(report: Path, classes: list, counts: dict, subset: set) -> None:
+    coco_total_images = len(counts)
+    coco_total_instances = sum(sum(class_counts.values()) for class_counts in counts.values())
+    subset_total_images = len(subset)
+    subset_total_instances = sum(counts[stem].get(c, 0) for stem in subset for c in classes)
+
+    def percentage(value: int, total: int) -> str:
+        return f"{value / total * 100:.2f}".replace(".", ",") if total else "0,00"
+
+    with report.open("w", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["CLASSE", "NOME", "IMMAGINI_COCO", "PERCENTUALE_IMMAGINI_COCO",
+                    "ISTANZE_COCO", "PERCENTUALE_ISTANZE_COCO", "IMMAGINI_SUBSET",
+                    "PERCENTUALE_IMMAGINI_SUBSET", "ISTANZE_SUBSET", "PERCENTUALE_ISTANZE_SUBSET"])
+        for c in classes:
+            before = [stem for stem, class_counts in counts.items() if c in class_counts]
+            after = [stem for stem in before if stem in subset]
+            coco_images = len(before)
+            subset_images = len(after)
+            coco_instances = sum(counts[stem][c] for stem in before)
+            subset_instances = sum(counts[stem][c] for stem in after)
+            w.writerow([c, COCO_NAMES[c], coco_images, percentage(coco_images, coco_total_images),
+                        coco_instances, percentage(coco_instances, coco_total_instances),
+                        subset_images, percentage(subset_images, subset_total_images),
+                        subset_instances, percentage(subset_instances, subset_total_instances)])
+
+
+def print_class_report(report: Path) -> None:
+    with report.open(newline="") as f:
+        rows = list(csv.reader(f, delimiter=";"))
+    print(f"\n{report}:")
+    groups = [
+        ("COCO", [0, 1, 2, 3, 4, 5], ["ID", "NOME", "IMMAGINI", "% IMG", "ISTANZE", "% IST."]),
+        ("SUBSET", [0, 1, 6, 7, 8, 9], ["ID", "NOME", "IMMAGINI", "% IMG", "ISTANZE", "% IST."]),
+    ]
+    for title, indices, headers in groups:
+        table = [headers, *[[row[i] for i in indices] for row in rows[1:]]]
+        widths = [max(len(row[i]) for row in table) for i in range(len(headers))]
+        print(f"{title}:")
+        for row_index, row in enumerate(table):
+            cells = []
+            for i, value in enumerate(row):
+                align = "<" if row_index == 0 or i == 1 else ">"
+                cells.append(f"{value:{align}{widths[i]}}")
+            print("  ".join(cells))
 
 
 def main():
@@ -185,40 +231,29 @@ def main():
     (args.out_dir / "train.txt").write_text("\n".join(paths) + "\n")
 
     report = args.out_dir / "train.csv"
-    with report.open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["classe", "nome", "scelta", "immagini_prima", "immagini_dopo", "istanze_prima", "istanze_dopo"])
-        for c in range(80):
-            before = [s for s in stems if c in counts[s]]
-            after = [s for s in before if s in selected]
-            w.writerow([c, COCO_NAMES[c], int(c in classes), len(before), len(after),
-                        sum(counts[s][c] for s in before), sum(counts[s][c] for s in after)])
+    write_class_report(report, classes, counts, selected)
     print(f"{len(selected)} immagini su {len(stems)} -> {args.out_dir / 'train.txt'}")
     if len(selected) > args.max_images:
         print(f"ATTENZIONE: {len(selected)} immagini, oltre --max-images {args.max_images}: "
               f"--min-per-class {min_per_class} ha portato le classi al minimo anche oltre il budget.")
-    print("Per classe scelta (dopo / prima il taglio):")
-    print(f"  {'classe':15s} {'immagini':>17s} {'istanze':>19s}")
-    for c in classes:
-        kept = [s for s in by_class[c] if s in selected]
-        inst_before = sum(counts[s][c] for s in by_class[c])
-        inst_after = sum(counts[s][c] for s in kept)
-        print(f"  {COCO_NAMES[c]:15s} {len(kept):7d} / {len(by_class[c]):7d} {inst_after:9d} / {inst_before:7d}")
-    print(f"Report: {report}")
-
     # Val: stesse classi, da val2017, con i label filtrati (v. docstring)
     val_images = args.coco_dir / "images" / "val2017"
     val_labels = args.coco_dir / "labels" / "val2017"
     pairs = [(p, val_labels / f"{p.stem}.txt") for p in sorted(val_images.iterdir())
              if p.suffix.lower() in IMAGE_EXTENSIONS]
+    val_counts = {image.stem: read_counts(label) for image, label in pairs}
     val_paths = sorted(write_filtered_dataset(pairs, val_images, args.out_dir / "val", set(classes)))
     n = len(val_paths)
     (args.out_dir / "val.txt").write_text("\n".join(val_paths) + "\n")
+    val_report = args.out_dir / "val.csv"
+    write_class_report(val_report, classes, val_counts, {Path(path).stem for path in val_paths})
     (args.out_dir / "classes.txt").write_text("\n".join(map(str, classes)) + "\n")
     (args.out_dir / "data.yaml").write_text("\n".join(
         ["train: train.txt", "val: val.txt", f"nc: {len(COCO_NAMES)}", "names:"]
         + [f"  {i}: {n}" for i, n in enumerate(COCO_NAMES)]) + "\n")
     print(f"Val: {n} immagini su {len(pairs)} di val2017 -> {args.out_dir / 'val.txt'}")
+    print_class_report(report)
+    print_class_report(val_report)
 
 
 if __name__ == "__main__":
