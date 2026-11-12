@@ -30,6 +30,10 @@ def main():
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--end2end", choices=("true", "false"), default=None,
+                        help="Forza la modalità end-to-end (true) o NMS (false) su entrambi i modelli. Default: "
+                             "quella dei pesi, che deve coincidere. Serve con un modello allenato in modalità NMS "
+                             "(end2end=False): il baseline va valutato in NMS, non end-to-end")
     parser.add_argument("--conf", type=float, default=0.25,
                         help="Confidence comune per le colonne *_at_conf")
     args = parser.parse_args()
@@ -62,8 +66,9 @@ def main():
         parser.error("Il modello baseline deve avere le 80 classi COCO")
     if any(trained.names.get(i) != names[i] for i in range(80)):
         parser.error("Le prime 80 classi del modello allenato non coincidono con la baseline")
-    if baseline.model.end2end != trained.model.end2end:
-        parser.error("I due modelli devono usare la stessa modalita end-to-end/NMS")
+    if args.end2end is None and baseline.model.end2end != trained.model.end2end:
+        parser.error("I due modelli devono usare la stessa modalita end-to-end/NMS (oppure --end2end true|false)")
+    end2end = baseline.model.end2end if args.end2end is None else args.end2end == "true"
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     data_yaml = args.out_dir / "coco_val.yaml"
@@ -79,11 +84,13 @@ def main():
         max_det=300, half=False, rect=True, augment=False, plots=False,
         save_json=False, verbose=False, project=str(args.out_dir.resolve()),
     )
+    if args.end2end is not None:
+        settings["end2end"] = end2end
     report = {
         "ultralytics_version": ultralytics.__version__,
         "dataset": str(images), "images": len(image_files),
         "metric_backend": "Ultralytics native, not official COCOeval",
-        "end2end": baseline.model.end2end, "fixed_confidence": args.conf,
+        "end2end": end2end, "fixed_confidence": args.conf,
         "settings": settings, "models": {},
     }
     metric_keys = ("precision", "recall", "AP50", "AP50_95",

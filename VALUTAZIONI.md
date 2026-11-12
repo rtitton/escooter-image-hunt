@@ -22,6 +22,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novemb
 - Il **multiclasse a 81 classi** (solo nostri dati) peggiora la escooter (video mAP50 0,553): le classi sono troppe e con pochi esempi (v. sezione 6).
 - **COCO + nostro split** (H100, yolo26n, nostre immagini ripetute una volta): classi COCO preservate (mAP50-95 globale 0,399), ma la escooter peggiora ancora (video mAP50 0,501 contro 0,726 della baseline), perché le nostre 1812 immagini sono circa l'1,5% del train. Rispetto a un vecchio yolo11n su COCO + un dataset Roboflow non curato, il 26n va meglio sul video e sul nostro valid (v. sezione 6; confronto non controllato).
 - **COCO + nostro split con immagini ripetute 5 volte**: video mAP50 0,530 (rep1: 0,501; baseline 0,726), valid 0,952, kickboard 0,960; migliora ma non trova ancora nessuna escooter piccola (v. sezione 6).
+- **COCO subset (13 classi, 24976 immagini) + nostro split ×1**: video mAP50 0,540 (COCO completo rep1: 0,501; rep5: 0,530; baseline 0,726), kickboard 0,971, con un quarto del tempo. Sulle 13 classi COCO perde in media 2,2 pp di AP50-95 rispetto a yolo26n pretrained (COCO completo: 0,4 pp); v. sezione 6.
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -263,6 +264,42 @@ Recall per taglia (rep5) sul video: piccole 0/86, medie 0,400 (rep1 0,331; basel
 - Ripetere 5 volte le nostre immagini aiuta, soprattutto sul valid (+4 punti di mAP50) e sul video (+3), ma il modello resta molto sotto la baseline monoclasse sul video e non trova nessuna escooter piccola.
 - Sul kickboard (oggetti grandi) è alla pari con la baseline (mAP50-95 0,817 contro 0,816).
 - Non verificato: se le classi COCO siano rimaste a posto (`compare_coco_models.py` non ancora eseguito su questa run) e se un fattore di ripetizione più alto o l'aggiunta di esempi piccoli cambi il quadro.
+
+### COCO subset 20000_4000 + nostro split, REPEAT=1 (yolo26n, H100)
+
+Run `yolo26n_cocosub_20000_4000_escooter_merge_rep1-2` (cartella in `models/`): subset di COCO (`make_coco_subset.py`, preset `traffic`, 13 classi, `--max-images 20000`, `--min-per-class 4000`, che porta il train a 24976 immagini e il val a 3172) più il nostro split ×1; 150 epoche, batch 32, patience 20, seme 42, 4,5 ore. Le altre 67 classi COCO sono sfondo. La mAP sul val della run (0,651 / 0,479) non è confrontabile con quella delle run su COCO completo: il val è quello del subset.
+
+Sui test set esterni (mAP50 / mAP50-95, classe escooter = 80, `eval_testset.py --imgsz 640`):
+
+| Insieme | subset rep1 | COCO completo rep1 | COCO completo rep5 | Baseline nostra (solo escooter) |
+|---|---|---|---|---|
+| Video | 0,540 / 0,385 | 0,501 / 0,320 | 0,530 / 0,365 | 0,726 / 0,502 |
+| Kickboard | 0,971 / 0,817 | 0,959 / 0,787 | 0,960 / 0,817 | 0,972 / 0,816 |
+
+Recall per taglia sul video (subset): piccole 0,012 (1/86), medie 0,434, grandi 0,685 (baseline 0,15 / 0,74 / 0,86). Il video test set ha 120 immagini e 323 box, un solo seme per run: differenze di 0,01–0,04 sono nel rumore. Il subset non è peggio di COCO completo sulla escooter (anzi è un po' sopra) e costa circa un quarto del tempo, ma il divario dalla baseline sulle medie e sulle piccole resta.
+
+Classi COCO, `compare_coco_models.py` su COCO val2017 (5000 immagini), 13 classi comuni, contro `yolo26n.pt`. `coco_escooter_yolo26n_1` è stato allenato in modalità NMS (`end2end=False`), quindi il confronto è fatto in NMS per tutti i modelli (`--end2end false`):
+
+| Classe | istanze | AP50-95 pretrained | COCO completo rep1 | subset rep1 |
+|---|---|---|---|---|
+| person | 10777 | 0,517 | 0,518 | 0,486 |
+| car | 1918 | 0,371 | 0,375 | 0,402 |
+| traffic light | 634 | 0,232 | 0,225 | 0,246 |
+| truck | 414 | 0,338 | 0,341 | 0,353 |
+| bench | 411 | 0,223 | 0,219 | 0,164 |
+| motorcycle | 367 | 0,430 | 0,423 | 0,437 |
+| bicycle | 314 | 0,290 | 0,289 | 0,282 |
+| bus | 283 | 0,650 | 0,647 | 0,666 |
+| train | 190 | 0,692 | 0,687 | 0,662 |
+| skateboard | 179 | 0,501 | 0,488 | 0,429 |
+| fire hydrant | 101 | 0,640 | 0,663 | 0,589 |
+| stop sign | 75 | 0,629 | 0,607 | 0,614 |
+| parking meter | 60 | 0,465 | 0,443 | 0,368 |
+| **media (non pesata)** | | **0,460** | **0,456** | **0,438** |
+
+- COCO completo conserva le classi COCO: −0,4 pp di media, ogni classe entro circa ±2 punti.
+- Il subset perde in media 2,2 pp di AP50-95 (3,8 pp di AP50), soprattutto su parking meter, skateboard, bench, fire hydrant, train e person; guadagna 2–3 punti su car, traffic light e truck. Con meno di 200 istanze nel val (parking meter, fire hydrant, stop sign) l'AP è rumoroso; bench (411) e person (10777) sono più affidabili.
+- Le 67 classi escluse dal subset peggiorano molto (fino a circa −73 pp): sono sfondo per costruzione.
 
 ## 7. Limiti delle misure
 
