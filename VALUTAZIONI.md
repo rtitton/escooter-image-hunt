@@ -23,6 +23,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novemb
 - **COCO + nostro split** (H100, yolo26n, nostre immagini ripetute una volta): classi COCO preservate (mAP50-95 globale 0,399), ma la escooter peggiora ancora (video mAP50 0,501 contro 0,726 della baseline), perché le nostre 1812 immagini sono circa l'1,5% del train. Rispetto a un vecchio yolo11n su COCO + un dataset Roboflow non curato, il 26n va meglio sul video e sul nostro valid (v. sezione 6; confronto non controllato).
 - **COCO + nostro split con immagini ripetute 5 volte**: video mAP50 0,530 (rep1: 0,501; baseline 0,726), valid 0,952, kickboard 0,960; migliora ma non trova ancora nessuna escooter piccola (v. sezione 6).
 - **COCO subset (13 classi, 24976 immagini) + nostro split ×1**: video mAP50 0,540 (COCO completo rep1: 0,501; rep5: 0,530; baseline 0,726), kickboard 0,971, con un quarto del tempo. Sulle 13 classi COCO perde in media 2,2 pp di AP50-95 rispetto a yolo26n pretrained (COCO completo: 0,4 pp); v. sezione 6.
+- **COCO subset + nostro split ×3** (100 epoche): video mAP50 0,606 / 0,429 (×1: 0,540 / 0,385), kickboard 0,980 / 0,835; classi COCO sulle 13 comuni invariate rispetto a ×1 (AP50-95 media 0,433 contro 0,436); piccole ancora a 2/86; v. sezione 6.
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -300,6 +301,20 @@ Classi COCO, `compare_coco_models.py` su COCO val2017 (5000 immagini), 13 classi
 - COCO completo conserva le classi COCO: −0,4 pp di media, ogni classe entro circa ±2 punti.
 - Il subset perde in media 2,2 pp di AP50-95 (3,8 pp di AP50), soprattutto su parking meter, skateboard, bench, fire hydrant, train e person; guadagna 2–3 punti su car, traffic light e truck. Con meno di 200 istanze nel val (parking meter, fire hydrant, stop sign) l'AP è rumoroso; bench (411) e person (10777) sono più affidabili.
 - Le 67 classi escluse dal subset peggiorano molto (fino a circa −73 pp): sono sfondo per costruzione.
+
+### COCO subset 20000_4000 + nostro split, REPEAT=3 (yolo26n, H100)
+
+Run `yolo26n_cocosub_20000_4000_escooter_merge_rep3` (cartella in `models/`): come la run con REPEAT=1 (stesso subset, yolo26n, batch 32, seme 42) ma con le nostre immagini ripetute 3 volte e **100 epoche invece di 150** (3,5 ore; migliore epoca 99, nessun early stopping). Il confronto non è quindi a parità di epoche, a sfavore di REPEAT=3.
+
+| Insieme | subset rep3 (100 ep) | subset rep1 (150 ep) | COCO completo rep5 | Baseline nostra |
+|---|---|---|---|---|
+| Video | 0,606 / 0,429 | 0,540 / 0,385 | 0,530 / 0,365 | 0,726 / 0,502 |
+| Kickboard | 0,980 / 0,835 | 0,971 / 0,817 | 0,960 / 0,817 | 0,972 / 0,816 |
+
+Recall per taglia sul video (rep3): piccole 2/86 (rep1 1/86), medie 70/145 = 0,483 (0,434), grandi 65/92 = 0,707 (0,685); baseline 13/86, 107/145, 79/92. Precision sul video 0,771 (rep1 0,813): più immagini nostre fanno trovare più escooter, con più falsi positivi.
+
+- Passare da REPEAT=1 a REPEAT=3 dà +6,6 punti di mAP50 sul video (sopra il rumore tipico di 0,01–0,04), con meno epoche. Recupera circa un terzo del divario dalla baseline (0,726) e sul kickboard la supera (0,835 contro 0,816 di mAP50-95, differenza di pochi box). Le piccole restano a zero.
+- Costo sulle classi COCO (13 classi comuni, `compare_coco_models.py`, end-to-end, stesso baseline `yolo26n.pt`): media AP50-95 0,433 contro 0,436 di REPEAT=1 e 0,454 del pretrained; media AP50 0,593 (0,594; 0,629). Aumentare le nostre immagini da 1 a 3 volte non peggiora le classi COCO in modo apprezzabile; il costo resta quello del subset (circa −2 pp), concentrato su bench (0,136 contro 0,223), parking meter (0,361 contro 0,459), skateboard e fire hydrant.
 
 ## 7. Limiti delle misure
 
