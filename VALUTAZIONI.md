@@ -369,6 +369,30 @@ Medie sulle 13 classi (yolo11n_bt / subset rep3): precision 0,722 / 0,686, recal
 - Sulle classi COCO l'11n è sopra di circa 3 punti di AP50-95 (il pretrained `yolo26n.pt` in NMS è a 0,460, quindi l'11n è in linea con il pretrained). Il subset è meglio su car e traffic light, pari su truck, motorcycle, bus e stop sign, peggio su bench, parking meter, skateboard, fire hydrant e train: le classi rare che il subset sacrifica. Su bench, parking meter e fire hydrant la perdita è soprattutto di precision (0,30 contro 0,61; 0,49 contro 0,74; 0,64 contro 0,94), a recall simile.
 - Nessuno dei due vince su tutto: l'11n conserva le classi COCO ma perde la escooter, il subset fa l'inverso.
 
+### Subset REPEAT=3 valutato a imgsz 800 e 960 (senza riallenare)
+
+Stesso modello (`yolo26n_cocosub_20000_4000_escooter_merge_rep3`, allenato a 640), inferenza a risoluzione maggiore con `eval_testset.py --imgsz` e `compare_coco_models.py --imgsz`.
+
+| imgsz | video mAP50 / 50-95 | recall piccole / medie / grandi | kickboard mAP50 / 50-95 | FP kickboard (grandi) |
+|---|---|---|---|---|
+| 640 | 0,606 / 0,429 | 0,023 / 0,483 / 0,707 | 0,980 / 0,835 | 3 |
+| 800 | 0,678 / 0,475 | 0,070 / 0,586 / 0,739 | 0,964 / 0,791 | 8 |
+| 960 | 0,720 / 0,510 | 0,151 / 0,634 / 0,815 | 0,924 / 0,671 | 16 |
+| baseline monoclasse a 640 | 0,726 / 0,502 | 0,15 / 0,74 / 0,86 | 0,972 / 0,816 | |
+
+Classi COCO (13 comuni, end-to-end, AP50-95 medio; baseline `yolo26n.pt` valutato alla stessa risoluzione):
+
+| imgsz | subset rep3 | `yolo26n.pt` | person rep3 / pretrained |
+|---|---|---|---|
+| 640 | 0,433 | 0,454 | 0,479 / 0,510 |
+| 800 | 0,440 | 0,459 | 0,494 / 0,531 |
+| 960 | 0,422 | 0,435 | 0,490 / 0,526 |
+
+- A 960 il subset arriva alla baseline sul video (mAP50 0,720 contro 0,726; mAP50-95 0,510 contro 0,502) e alla stessa recall sulle piccole (13/86), senza riallenare e senza toccare la person. Le medie restano sotto (0,634 contro 0,74).
+- Sul kickboard peggiora salendo di risoluzione (mAP50-95 0,835 → 0,791 → 0,671, falsi positivi da 3 a 16): il modello è allenato a 640 e vede più box grandi della scala che conosce. Nessuna risoluzione vince su entrambi i test set, come per la baseline (sezione 5); 800 è un compromesso.
+- Il costo sulle classi COCO rispetto al pretrained resta di circa 2 punti a ogni risoluzione: alzare `imgsz` non lo peggiora. Il calo su train a 960 (0,676 → 0,507) è dovuto alla risoluzione, come mostra il pretrained (0,691 → 0,472).
+- Costo: tempo di inferenza circa 2,25 volte a 960. Resta da provare se allenare a 800/960 valga più dell'inferenza a risoluzione maggiore (per la baseline, allenare a 960 ha aiutato poco).
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
