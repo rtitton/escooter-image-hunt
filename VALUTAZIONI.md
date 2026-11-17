@@ -24,6 +24,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novemb
 - **COCO + nostro split con immagini ripetute 5 volte**: video mAP50 0,530 (rep1: 0,501; baseline 0,726), valid 0,952, kickboard 0,960; migliora ma non trova ancora nessuna escooter piccola (v. sezione 6).
 - **COCO subset (13 classi, 24976 immagini) + nostro split ×1**: video mAP50 0,540 (COCO completo rep1: 0,501; rep5: 0,530; baseline 0,726), kickboard 0,971, con un quarto del tempo. Sulle 13 classi COCO perde in media 2,2 pp di AP50-95 rispetto a yolo26n pretrained (COCO completo: 0,4 pp); v. sezione 6.
 - **COCO subset + nostro split ×3** (100 epoche): video mAP50 0,606 / 0,429 (×1: 0,540 / 0,385), kickboard 0,980 / 0,835; classi COCO sulle 13 comuni invariate rispetto a ×1 (AP50-95 media 0,433 contro 0,436); piccole ancora a 2/86; v. sezione 6.
+- **COCO subset + nostro split ×5** (100 epoche): video mAP50 0,575 / 0,417 (×3: 0,606 / 0,429), kickboard 0,973 / 0,838; classi COCO 0,425 di AP50-95 medio (×3: 0,433), person 0,474 (pretrained 0,510). Nessun guadagno da ×3 a ×5: REPEAT=3 resta il valore migliore; v. sezione 6.
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -315,6 +316,22 @@ Recall per taglia sul video (rep3): piccole 2/86 (rep1 1/86), medie 70/145 = 0,4
 
 - Passare da REPEAT=1 a REPEAT=3 dà +6,6 punti di mAP50 sul video (sopra il rumore tipico di 0,01–0,04), con meno epoche. Recupera circa un terzo del divario dalla baseline (0,726) e sul kickboard la supera (0,835 contro 0,816 di mAP50-95, differenza di pochi box). Le piccole restano a zero.
 - Costo sulle classi COCO (13 classi comuni, `compare_coco_models.py`, end-to-end, stesso baseline `yolo26n.pt`): media AP50-95 0,433 contro 0,436 di REPEAT=1 e 0,454 del pretrained; media AP50 0,593 (0,594; 0,629). Aumentare le nostre immagini da 1 a 3 volte non peggiora le classi COCO in modo apprezzabile; il costo resta quello del subset (circa −2 pp), concentrato su bench (0,136 contro 0,223), parking meter (0,361 contro 0,459), skateboard e fire hydrant.
+
+### COCO subset 20000_4000 + nostro split, REPEAT=5 (yolo26n, H100)
+
+Run `yolo26n_cocosub_20000_4000_escooter_merge_rep5` (cartella in `models/`): come REPEAT=3 (stesso subset, yolo26n, batch 32, seme 42, `freeze` 0, 100 epoche) ma con le nostre immagini ripetute 5 volte.
+
+| Insieme | subset rep5 | subset rep3 | subset rep1 (150 ep) | Baseline nostra |
+|---|---|---|---|---|
+| Video | 0,575 / 0,417 | 0,606 / 0,429 | 0,540 / 0,385 | 0,726 / 0,502 |
+| Kickboard | 0,973 / 0,838 | 0,980 / 0,835 | 0,971 / 0,817 | 0,972 / 0,816 |
+
+Recall per taglia sul video (rep5): piccole 2/86 = 0,023, medie 0,497, grandi 0,739 (rep3: 2/86, 0,483, 0,707); precision 0,853 (rep3 0,771).
+
+Classi COCO (13 comuni, end-to-end, contro `yolo26n.pt`): media AP50-95 0,425 (rep3 0,433, rep1 0,436, pretrained 0,454), AP50 0,584 (0,593; 0,594; 0,629). Person 0,474 contro 0,510 del pretrained (rep1 e rep3: 0,479): perdita di circa 3 punti costante in tutte le run. Bench 0,140, parking meter 0,362, skateboard 0,405, stop sign 0,582.
+
+- Da REPEAT=3 a REPEAT=5 non c'è un guadagno sul video (−3 punti di mAP50, nel rumore di un solo seme) e le classi COCO costano un po' di più: la curva si appiattisce già a REPEAT=3, che resta il valore migliore. Le ripetizioni non chiudono il divario dalla baseline sulle medie e sulle piccole.
+- Diagnostica sul modello REPEAT=3 (video test set, predizioni di tutte le classi, soglia 0,001): sulle piccole mancate (81/86 con confidenza escooter sotto 0,05) non c'è una coda vicino alla soglia, quindi non è un problema di calibrazione. Circa metà ha una box `person` sovrapposta (IoU ≥ 0,5): il modello vede il pilota ma non lo scooter, che visto di fronte è un'asta sottile coperta dalle gambe; le annotazioni sono corrette. Delle 24 grandi mancate (confidenza < 0,05), 15 sono dello stesso video (`monopattini_serali`, scooter di lato con pilota che spinge a gamba tesa, in parte coperto da una palma) e 9 di `video-monopattini-lastampa3` (vigili, con box dubbie su gambe e cintura). La baseline monoclasse trova 13 di quelle 24 (11 su 15 della scena serale, con confidenza 0,5–0,94), quindi il segnale visivo c'è e il subset lo perde per competizione con le altre classi o diluizione. Sulle piccole la baseline trova 13/86 a conf ≥ 0,25 e 36/86 a ≥ 0,05, il subset 2 e 5. Le box piccole e le grandi mancate vengono da poche scene correlate, quindi pesano meno di quanto dicano i conteggi.
 
 ## 7. Limiti delle misure
 
