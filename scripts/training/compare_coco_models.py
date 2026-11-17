@@ -61,9 +61,9 @@ def main():
 
     baseline = YOLO(str(args.baseline.resolve()))
     trained = YOLO(str(args.trained.resolve()))
-    names = baseline.names
-    if set(names) != set(range(80)):
-        parser.error("Il modello baseline deve avere le 80 classi COCO")
+    if not set(range(80)) <= set(baseline.names):
+        parser.error("Il modello baseline deve avere le 80 classi COCO (indici 0-79; sono ammesse classi extra)")
+    names = {i: baseline.names[i] for i in range(80)}  # solo le 80 COCO, anche se il baseline ne ha di più
     if any(trained.names.get(i) != names[i] for i in range(80)):
         parser.error("Le prime 80 classi del modello allenato non coincidono con la baseline")
     if args.end2end is None and baseline.model.end2end != trained.model.end2end:

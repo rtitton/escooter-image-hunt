@@ -333,6 +333,42 @@ Classi COCO (13 comuni, end-to-end, contro `yolo26n.pt`): media AP50-95 0,425 (r
 - Da REPEAT=3 a REPEAT=5 non c'è un guadagno sul video (−3 punti di mAP50, nel rumore di un solo seme) e le classi COCO costano un po' di più: la curva si appiattisce già a REPEAT=3, che resta il valore migliore. Le ripetizioni non chiudono il divario dalla baseline sulle medie e sulle piccole.
 - Diagnostica sul modello REPEAT=3 (video test set, predizioni di tutte le classi, soglia 0,001): sulle piccole mancate (81/86 con confidenza escooter sotto 0,05) non c'è una coda vicino alla soglia, quindi non è un problema di calibrazione. Circa metà ha una box `person` sovrapposta (IoU ≥ 0,5): il modello vede il pilota ma non lo scooter, che visto di fronte è un'asta sottile coperta dalle gambe; le annotazioni sono corrette. Delle 24 grandi mancate (confidenza < 0,05), 15 sono dello stesso video (`monopattini_serali`, scooter di lato con pilota che spinge a gamba tesa, in parte coperto da una palma) e 9 di `video-monopattini-lastampa3` (vigili, con box dubbie su gambe e cintura). La baseline monoclasse trova 13 di quelle 24 (11 su 15 della scena serale, con confidenza 0,5–0,94), quindi il segnale visivo c'è e il subset lo perde per competizione con le altre classi o diluizione. Sulle piccole la baseline trova 13/86 a conf ≥ 0,25 e 36/86 a ≥ 0,05, il subset 2 e 5. Le box piccole e le grandi mancate vengono da poche scene correlate, quindi pesano meno di quanto dicano i conteggi.
 
+### Confronto fra il vecchio yolo11n e il subset REPEAT=3
+
+Confronto non controllato (yolo11n contro yolo26n, COCO intero più dataset Roboflow non curato contro subset a 13 classi più nostro split ×3, 150 contro 100 epoche, batch 120 con `multi_scale` contro batch 32): serve solo come misura. Le classi in comune sono le 13 del subset (person, car, traffic light, truck, bench, motorcycle, bicycle, bus, train, skateboard, fire hydrant, stop sign, parking meter) più la escooter; le altre 67 non entrano, perché il subset è allenato a ignorarle.
+
+Escooter sui test set esterni (`eval_testset.py`, classe 80, 640, ciascun modello nella sua modalità nativa):
+
+| | video mAP50 / 50-95 | recall piccole / medie / grandi | kickboard mAP50 / 50-95 |
+|---|---|---|---|
+| `coco_escooter_yolo11n_bt` | 0,411 / 0,281 | 0,000 / 0,234 / 0,663 | 0,971 / 0,760 |
+| subset rep3 | 0,606 / 0,429 | 0,023 / 0,483 / 0,707 | 0,980 / 0,835 |
+
+Classi COCO su val2017 (`compare_coco_models.py --end2end false`: entrambi in NMS, perché l'11n è nativo NMS; il 26n è stato forzato in NMS):
+
+| Classe | istanze | AP50-95 yolo11n_bt | AP50-95 subset rep3 |
+|---|---|---|---|
+| person | 10777 | 0,518 | 0,487 |
+| car | 1918 | 0,368 | 0,401 |
+| traffic light | 634 | 0,215 | 0,238 |
+| truck | 414 | 0,336 | 0,341 |
+| bench | 411 | 0,226 | 0,145 |
+| motorcycle | 367 | 0,451 | 0,445 |
+| bicycle | 314 | 0,285 | 0,269 |
+| bus | 283 | 0,662 | 0,669 |
+| train | 190 | 0,708 | 0,686 |
+| skateboard | 179 | 0,488 | 0,431 |
+| fire hydrant | 101 | 0,650 | 0,598 |
+| stop sign | 75 | 0,625 | 0,618 |
+| parking meter | 60 | 0,512 | 0,370 |
+| **media (non pesata)** | | **0,465** | **0,438** |
+
+Medie sulle 13 classi (yolo11n_bt / subset rep3): precision 0,722 / 0,686, recall 0,570 / 0,527, AP50 0,635 / 0,600.
+
+- Sulla escooter il subset è molto meglio: +19,5 punti di mAP50 sul video e il doppio della recall sulle medie; sul kickboard i due sono vicini in mAP50 (0,971 contro 0,980), ma il subset è a +7,5 punti di mAP50-95.
+- Sulle classi COCO l'11n è sopra di circa 3 punti di AP50-95 (il pretrained `yolo26n.pt` in NMS è a 0,460, quindi l'11n è in linea con il pretrained). Il subset è meglio su car e traffic light, pari su truck, motorcycle, bus e stop sign, peggio su bench, parking meter, skateboard, fire hydrant e train: le classi rare che il subset sacrifica. Su bench, parking meter e fire hydrant la perdita è soprattutto di precision (0,30 contro 0,61; 0,49 contro 0,74; 0,64 contro 0,94), a recall simile.
+- Nessuno dei due vince su tutto: l'11n conserva le classi COCO ma perde la escooter, il subset fa l'inverso.
+
 ## 7. Limiti delle misure
 
 - **Valid piccolo:** 270 immagini e 424 istanze, di cui 14 piccole. Differenze di un punto di mAP50-95 non sono significative.
