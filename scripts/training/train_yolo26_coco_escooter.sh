@@ -14,7 +14,8 @@
 # e della prima run, 150 epoche):
 #   DATA_YAML    data.yaml del dataset da usare (output di build_coco_merged_lists.sh)
 #   YOLO_MODEL   pesi di partenza (default yolo26n.pt)
-#   EPOCHS (150), BATCH (32), WORKERS (16: sulla H100 il collo di bottiglia è la CPU), FREEZE (0)
+#   EPOCHS (150), BATCH (32), WORKERS (16: sulla H100 il collo di bottiglia è la CPU), FREEZE (0),
+#   IMGSZ (640; valutare poi con lo stesso --imgsz e anche a 640)
 #   NAME         nome della run (default <modello>_<cartella del data.yaml>, es.
 #                yolo26n_coco_escooter_merge_rep5)
 #   RESUME       1 = riprende la run interrotta chiamata NAME (da last.pt, v. sotto)
@@ -35,6 +36,7 @@ EPOCHS="${EPOCHS:-150}"
 BATCH="${BATCH:-32}"
 WORKERS="${WORKERS:-16}"
 FREEZE="${FREEZE:-0}"
+IMGSZ="${IMGSZ:-640}"
 RESUME="${RESUME:-0}"
 
 if [[ -z "$DATA_YAML" || ! -f "$DATA_YAML" ]]; then
@@ -52,7 +54,7 @@ TRAIN_ARGS=(
   --model "$YOLO_MODEL"
   --epochs "$EPOCHS"
   --batch "$BATCH"
-  --imgsz 640
+  --imgsz "$IMGSZ"
   --patience 20
   --workers "$WORKERS"
   --seed 42
