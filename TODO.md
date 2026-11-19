@@ -13,7 +13,7 @@ D=data/processed/cocosub_20000_4000_escooter_merge_rep3/data.yaml
 DATA_YAML=$D EPOCHS=100 IMGSZ=960 NAME=yolo26n_cocosub_20000_4000_escooter_merge_rep3_imgsz960 \
     scripts/training/train_yolo26_coco_escooter.sh
 
-# 2. modello più grande
+# 2. modello più grande (FATTO: risultati in VALUTAZIONI.md, sezione 6, "yolo26s")
 DATA_YAML=$D EPOCHS=100 YOLO_MODEL=yolo26s.pt NAME=yolo26s_cocosub_20000_4000_escooter_merge_rep3 \
     scripts/training/train_yolo26_coco_escooter.sh
 

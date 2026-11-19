@@ -25,6 +25,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novemb
 - **COCO subset (13 classi, 24976 immagini) + nostro split ×1**: video mAP50 0,540 (COCO completo rep1: 0,501; rep5: 0,530; baseline 0,726), kickboard 0,971, con un quarto del tempo. Sulle 13 classi COCO perde in media 2,2 pp di AP50-95 rispetto a yolo26n pretrained (COCO completo: 0,4 pp); v. sezione 6.
 - **COCO subset + nostro split ×3** (100 epoche): video mAP50 0,606 / 0,429 (×1: 0,540 / 0,385), kickboard 0,980 / 0,835; classi COCO sulle 13 comuni invariate rispetto a ×1 (AP50-95 media 0,433 contro 0,436); piccole ancora a 2/86; v. sezione 6.
 - **COCO subset + nostro split ×5** (100 epoche): video mAP50 0,575 / 0,417 (×3: 0,606 / 0,429), kickboard 0,973 / 0,838; classi COCO 0,425 di AP50-95 medio (×3: 0,433), person 0,474 (pretrained 0,510). Nessun guadagno da ×3 a ×5: REPEAT=3 resta il valore migliore; v. sezione 6.
+- **yolo26s sul subset ×3** (100 epoche): video mAP50 0,643 / 0,451 a 640 (yolo26n: 0,606 / 0,429), kickboard 0,984 / 0,854; a 960 in inferenza il video arriva a 0,741 (baseline 0,726) ma il kickboard scende a 0,694 di mAP50-95. Le classi COCO perdono 3,9 punti rispetto al pretrained `s` (la `n`: 2,1), e la person 6,2 (0,594 → 0,532); v. sezione 6.
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -392,6 +393,35 @@ Classi COCO (13 comuni, end-to-end, AP50-95 medio; baseline `yolo26n.pt` valutat
 - Sul kickboard peggiora salendo di risoluzione (mAP50-95 0,835 → 0,791 → 0,671, falsi positivi da 3 a 16): il modello è allenato a 640 e vede più box grandi della scala che conosce. Nessuna risoluzione vince su entrambi i test set, come per la baseline (sezione 5); 800 è un compromesso.
 - Il costo sulle classi COCO rispetto al pretrained resta di circa 2 punti a ogni risoluzione: alzare `imgsz` non lo peggiora. Il calo su train a 960 (0,676 → 0,507) è dovuto alla risoluzione, come mostra il pretrained (0,691 → 0,472).
 - Costo: tempo di inferenza circa 2,25 volte a 960. Resta da provare se allenare a 800/960 valga più dell'inferenza a risoluzione maggiore (per la baseline, allenare a 960 ha aiutato poco).
+
+### COCO subset 20000_4000 + nostro split, REPEAT=3, yolo26s (H100)
+
+Run `yolo26s_cocosub_20000_4000_escooter_merge_rep3` (cartella in `models/`): identica a `yolo26n_..._rep3` (stesso subset e liste, batch 32, 100 epoche, seme 42, `freeze` 0, 640) con `yolo26s.pt` al posto di `yolo26n.pt`. Valutata a 640, 800 e 960 (inferenza).
+
+Escooter sui test set esterni (classe 80):
+
+| imgsz | video mAP50 / 50-95 | recall piccole / medie / grandi | kickboard mAP50 / 50-95 | FP kickboard |
+|---|---|---|---|---|
+| 640 | 0,643 / 0,451 | 0,070 / 0,545 / 0,739 | 0,984 / 0,854 | 4 |
+| 800 | 0,692 / 0,482 | 0,070 / 0,621 / 0,793 | 0,980 / 0,824 | 7 |
+| 960 | 0,741 / 0,506 | 0,174 / 0,662 / 0,826 | 0,956 / 0,694 | 20 |
+| yolo26n rep3, 640 | 0,606 / 0,429 | 0,023 / 0,483 / 0,707 | 0,980 / 0,835 | 3 |
+| yolo26n rep3, 960 | 0,720 / 0,510 | 0,151 / 0,634 / 0,815 | 0,924 / 0,671 | 16 |
+| baseline monoclasse, 640 | 0,726 / 0,502 | 0,15 / 0,74 / 0,86 | 0,972 / 0,816 | |
+
+Classi COCO (13 comuni, `compare_coco_models.py`, end-to-end, contro `yolo26s.pt` alla stessa risoluzione), AP50-95 medio e person:
+
+| imgsz | yolo26s subset rep3 | yolo26s pretrained | person rep3 / pretrained |
+|---|---|---|---|
+| 640 | 0,489 | 0,528 | 0,532 / 0,594 |
+| 800 | 0,494 | 0,523 | 0,545 / 0,608 |
+| 960 | 0,474 | 0,494 | 0,538 / 0,596 |
+
+A 640 il calo rispetto al pretrained è di 3,9 punti per la `s` (0,528 → 0,489) contro 2,1 della `n` (0,454 → 0,433); la person perde 6,2 punti (0,594 → 0,532) contro 3,1 della `n` (0,510 → 0,479), ma in valore assoluto la `s` resta sopra. Bench 0,318 → 0,205, parking meter 0,541 → 0,448, skateboard 0,589 → 0,504, bicycle 0,366 → 0,323; car, traffic light, stop sign, motorcycle e bus restano vicine al pretrained.
+
+- La `s` migliora la escooter a parità di recipe: a 640 +3,7 punti di mAP50 sul video (nel rumore tipico di un seme), medie 0,545 contro 0,483, piccole 6/86 contro 2/86; sul kickboard 0,984 / 0,854, il valore più alto finora. Non chiude il divario dalla baseline a 640 (0,643 contro 0,726).
+- Con l'inferenza a risoluzione maggiore gli effetti si sommano: a 960 il video supera la baseline (mAP50 0,741 contro 0,726; recall piccole 0,174 contro 0,15) ma il kickboard cala a 0,694 di mAP50-95 con 20 falsi positivi. A 800 è il punto più equilibrato: video 0,692 / 0,482, kickboard 0,980 / 0,824, classi COCO e person al massimo (0,494; 0,545). Nessuna risoluzione vince su entrambi i test set.
+- Il costo sulle classi COCO scende salendo di risoluzione (−3,9 punti a 640, −2,9 a 800, −2,0 a 960, perché il pretrained cala più del subset), ma la person resta circa 6 punti sotto il suo pretrained a ogni risoluzione.
 
 ## 7. Limiti delle misure
 
