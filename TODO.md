@@ -17,7 +17,7 @@ DATA_YAML=$D EPOCHS=100 IMGSZ=960 NAME=yolo26n_cocosub_20000_4000_escooter_merge
 DATA_YAML=$D EPOCHS=100 YOLO_MODEL=yolo26s.pt NAME=yolo26s_cocosub_20000_4000_escooter_merge_rep3 \
     scripts/training/train_yolo26_coco_escooter.sh
 
-# 3. backbone congelato (primi 10 layer)
+# 3. backbone congelato (primi 10 layer) (FATTO: peggiora la escooter, v. VALUTAZIONI.md, sezione 6, "freeze=10")
 DATA_YAML=$D EPOCHS=100 FREEZE=10 NAME=yolo26n_cocosub_20000_4000_escooter_merge_rep3_freeze10 \
     scripts/training/train_yolo26_coco_escooter.sh
 ```

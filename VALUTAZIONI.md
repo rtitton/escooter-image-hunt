@@ -26,6 +26,7 @@ Registro delle analisi e delle valutazioni fatte fra il 26 ottobre e l'11 novemb
 - **COCO subset + nostro split ×3** (100 epoche): video mAP50 0,606 / 0,429 (×1: 0,540 / 0,385), kickboard 0,980 / 0,835; classi COCO sulle 13 comuni invariate rispetto a ×1 (AP50-95 media 0,433 contro 0,436); piccole ancora a 2/86; v. sezione 6.
 - **COCO subset + nostro split ×5** (100 epoche): video mAP50 0,575 / 0,417 (×3: 0,606 / 0,429), kickboard 0,973 / 0,838; classi COCO 0,425 di AP50-95 medio (×3: 0,433), person 0,474 (pretrained 0,510). Nessun guadagno da ×3 a ×5: REPEAT=3 resta il valore migliore; v. sezione 6.
 - **yolo26s sul subset ×3** (100 epoche): video mAP50 0,643 / 0,451 a 640 (yolo26n: 0,606 / 0,429), kickboard 0,984 / 0,854; a 960 in inferenza il video arriva a 0,741 (baseline 0,726) ma il kickboard scende a 0,694 di mAP50-95. Le classi COCO perdono 3,9 punti rispetto al pretrained `s` (la `n`: 2,1), e la person 6,2 (0,594 → 0,532); v. sezione 6.
+- **yolo26n ×3 con `freeze=10`** (100 epoche, fermata all'epoca 85): video mAP50 0,501 / 0,360 (senza `freeze`: 0,606 / 0,429), kickboard 0,959 / 0,832; classi COCO appena meglio (AP50-95 medio 0,439 contro 0,433, person 0,488 contro 0,479). Non conviene: si perde la escooter sulle medie (recall 0,290 contro 0,483); v. sezione 6.
 - La leva più promettente è **aggiungere esempi piccoli** al train e, nel merge con COCO, **ripetere le nostre immagini** (3-5 volte).
 
 ## 1. Dataset e split
@@ -422,6 +423,23 @@ A 640 il calo rispetto al pretrained è di 3,9 punti per la `s` (0,528 → 0,489
 - La `s` migliora la escooter a parità di recipe: a 640 +3,7 punti di mAP50 sul video (nel rumore tipico di un seme), medie 0,545 contro 0,483, piccole 6/86 contro 2/86; sul kickboard 0,984 / 0,854, il valore più alto finora. Non chiude il divario dalla baseline a 640 (0,643 contro 0,726).
 - Con l'inferenza a risoluzione maggiore gli effetti si sommano: a 960 il video supera la baseline (mAP50 0,741 contro 0,726; recall piccole 0,174 contro 0,15) ma il kickboard cala a 0,694 di mAP50-95 con 20 falsi positivi. A 800 è il punto più equilibrato: video 0,692 / 0,482, kickboard 0,980 / 0,824, classi COCO e person al massimo (0,494; 0,545). Nessuna risoluzione vince su entrambi i test set.
 - Il costo sulle classi COCO scende salendo di risoluzione (−3,9 punti a 640, −2,9 a 800, −2,0 a 960, perché il pretrained cala più del subset), ma la person resta circa 6 punti sotto il suo pretrained a ogni risoluzione.
+
+### COCO subset 20000_4000 + nostro split, REPEAT=3, `freeze=10` (yolo26n, H100)
+
+Run `yolo26n_cocosub_20000_4000_escooter_merge_rep3_freeze10` (cartella in `models/`): identica a `yolo26n_..._rep3` (stesso subset e liste, batch 32, 100 epoche, seme 42, 640) con `freeze=10` (primi 10 layer, cioè il backbone, congelati). Si è fermata per early stopping all'epoca 85 (migliore epoca 65, `patience` 20).
+
+| Insieme | rep3 `freeze=10` | rep3 (`freeze` 0) | Baseline nostra |
+|---|---|---|---|
+| Video | 0,501 / 0,360 | 0,606 / 0,429 | 0,726 / 0,502 |
+| Kickboard | 0,959 / 0,832 | 0,980 / 0,835 | 0,972 / 0,816 |
+
+Recall per taglia sul video: piccole 0,012 (1/86), medie 0,290, grandi 0,696 (rep3: 0,023; 0,483; 0,707).
+
+Classi COCO (13 comuni, end-to-end, contro `yolo26n.pt`), AP50-95 medio: 0,439 (rep3 0,433, pretrained 0,454); AP50 0,601 (0,593; 0,629); precision / recall 0,691 / 0,533 (0,685 / 0,518; 0,707 / 0,564). Person 0,488 (rep3 0,479, pretrained 0,510). Dove aiuta: skateboard 0,495 (rep3 0,436, pretrained 0,497), parking meter 0,410 (0,361; 0,459), bench 0,177 (0,136; 0,223), fire hydrant 0,611 (0,592; 0,635); su car, traffic light, bus e motorcycle torna ai livelli del pretrained.
+
+- Congelare il backbone peggiora molto la escooter sul video (mAP50 −10,5 punti, recall sulle medie da 0,483 a 0,290), mentre il kickboard resta quasi uguale. Il backbone fermo non si adatta alla escooter, soprattutto sulle medie.
+- Sulle classi COCO il guadagno è piccolo: +0,6 punti di AP50-95 medio (calo dal pretrained da 2,1 a 1,5) e +0,9 sulla person, dentro il rumore; si concentra sulle classi rare che il subset sacrifica.
+- Scambio sfavorevole: non conviene con la escooter come obiettivo principale.
 
 ## 7. Limiti delle misure
 
